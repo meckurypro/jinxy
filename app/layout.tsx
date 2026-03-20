@@ -1,3 +1,4 @@
+// app/layout.tsx
 import type { Metadata, Viewport } from 'next'
 import '@/styles/globals.css'
 
@@ -47,6 +48,13 @@ export default function RootLayout({
         <meta name="apple-mobile-web-app-title" content="Jinxy" />
         <meta name="msapplication-TileColor" content="#0A0A0F" />
         <meta name="msapplication-tap-highlight" content="no" />
+
+        {/*
+          Fonts are loaded here via <link> tags with preconnect.
+          The @import in globals.css has been removed to avoid loading
+          the same font twice (which causes a redundant network request
+          and delays first paint).
+        */}
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
@@ -65,7 +73,7 @@ export default function RootLayout({
   )
 }
 
-// Inline script to set theme before paint (prevents flash)
+// Inline script to set theme before paint — prevents flash of wrong theme
 function ThemeScript() {
   const script = `
     (function() {
