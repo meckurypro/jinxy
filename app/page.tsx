@@ -2,31 +2,18 @@
 'use client'
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 
 export default function SplashPage() {
   const router = useRouter()
 
   useEffect(() => {
-    const check = async () => {
-      const supabase = createClient()
-
-      // Run auth check and minimum display timer IN PARALLEL.
-      // Previously these were sequential: getUser() THEN setTimeout(1800).
-      // Total wait was authLatency + 1800ms. Now it's max(authLatency, 1000ms).
-      const [{ data: { user } }] = await Promise.all([
-        supabase.auth.getUser(),
-        new Promise<void>(r => setTimeout(r, 1000)),
-      ])
-
-      if (user) {
-        router.replace('/home')
-      } else {
-        const seen = localStorage.getItem('jinxy-onboarded')
-        router.replace(seen ? '/auth/login' : '/onboarding')
-      }
-    }
-    check()
+    // No auth check here — middleware handles routing logged-in users.
+    // Just show the splash briefly then go to onboarding/login decision.
+    const seen = localStorage.getItem('jinxy-onboarded')
+    const timer = setTimeout(() => {
+      router.replace(seen ? '/auth/login' : '/onboarding')
+    }, 1000)
+    return () => clearTimeout(timer)
   }, [router])
 
   return (
@@ -34,7 +21,6 @@ export default function SplashPage() {
       className="flex flex-col items-center justify-center min-h-dvh relative"
       style={{ background: 'var(--bg-base)' }}
     >
-      {/* Background glow */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
@@ -42,7 +28,6 @@ export default function SplashPage() {
         }}
       />
 
-      {/* Logo */}
       <div className="relative flex flex-col items-center gap-3">
         <div
           className="w-20 h-20 rounded-2xl flex items-center justify-center mb-2"
@@ -84,7 +69,6 @@ export default function SplashPage() {
         </p>
       </div>
 
-      {/* Loading dots */}
       <div className="absolute bottom-16 flex gap-1.5">
         {[0, 1, 2].map(i => (
           <div
