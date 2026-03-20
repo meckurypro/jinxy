@@ -1,11 +1,12 @@
+// app/(client)/find/confirmed/page.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSupabase } from '@/lib/hooks/useSupabase'
 import { Avatar } from '@/components/shared/Avatar'
 
-export default function ConfirmedPage() {
+function ConfirmedContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const bookingId = searchParams.get('booking')
@@ -44,14 +45,6 @@ export default function ConfirmedPage() {
     }
   }
 
-  const handleSayHello = () => {
-    router.push(`/messages/${bookingId}`)
-  }
-
-  const handleTrack = () => {
-    router.push(`/jinxes/${bookingId}/track`)
-  }
-
   const clientName = (client?.full_name as string)?.split(' ')[0] || 'you'
 
   return (
@@ -67,7 +60,7 @@ export default function ConfirmedPage() {
         }}
       />
 
-      {/* Confetti particles */}
+      {/* Confetti */}
       {visible && Array.from({ length: 12 }).map((_, i) => (
         <div
           key={i}
@@ -93,15 +86,7 @@ export default function ConfirmedPage() {
       >
         {/* Overlapping avatars */}
         <div className="relative flex items-center justify-center mb-8" style={{ height: 80 }}>
-          {/* Client avatar */}
-          <div
-            style={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(-80px)',
-              zIndex: 1,
-            }}
-          >
+          <div style={{ position: 'absolute', left: '50%', transform: 'translateX(-80px)', zIndex: 1 }}>
             <Avatar
               src={client?.avatar_url as string | null}
               name={(client?.full_name as string) || (client?.username as string) || 'C'}
@@ -109,8 +94,6 @@ export default function ConfirmedPage() {
               showRing
             />
           </div>
-
-          {/* Heart */}
           <div
             className="absolute z-10 w-8 h-8 rounded-full flex items-center justify-center"
             style={{
@@ -120,20 +103,10 @@ export default function ConfirmedPage() {
             }}
           >
             <svg width="14" height="12" viewBox="0 0 14 12" fill="none">
-              <path d="M7 11S1 7 1 4a3 3 0 016 0 3 3 0 016 0c0 3-6 7-6 7z"
-                fill="white" />
+              <path d="M7 11S1 7 1 4a3 3 0 016 0 3 3 0 016 0c0 3-6 7-6 7z" fill="white" />
             </svg>
           </div>
-
-          {/* Jinx avatar */}
-          <div
-            style={{
-              position: 'absolute',
-              left: '50%',
-              transform: 'translateX(16px)',
-              zIndex: 1,
-            }}
-          >
+          <div style={{ position: 'absolute', left: '50%', transform: 'translateX(16px)', zIndex: 1 }}>
             <Avatar
               src={jinx?.avatar_url as string | null}
               name={(jinx?.full_name as string) || (jinx?.username as string) || 'J'}
@@ -143,28 +116,19 @@ export default function ConfirmedPage() {
           </div>
         </div>
 
-        {/* Title */}
-        <h1
-          className="font-display text-4xl mb-3"
-          style={{ color: 'var(--text-primary)', lineHeight: 1.2 }}
-        >
+        <h1 className="font-display text-4xl mb-3" style={{ color: 'var(--text-primary)', lineHeight: 1.2 }}>
           It's a Jinx,{' '}
-          <span style={{ color: 'var(--pink)', fontStyle: 'italic' }}>
-            {clientName}!
-          </span>
+          <span style={{ color: 'var(--pink)', fontStyle: 'italic' }}>{clientName}!</span>
         </h1>
 
-        <p
-          className="text-sm mb-10"
-          style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}
-        >
+        <p className="text-sm mb-10"
+          style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
           Start a conversation now with each other
         </p>
 
-        {/* CTAs */}
         <div className="w-full space-y-3">
           <button
-            onClick={handleSayHello}
+            onClick={() => router.push(`/messages/${bookingId}`)}
             className="w-full py-4 rounded-full text-base font-semibold text-white"
             style={{
               background: 'var(--pink)',
@@ -176,9 +140,8 @@ export default function ConfirmedPage() {
           >
             Say hello 👋
           </button>
-
           <button
-            onClick={handleTrack}
+            onClick={() => router.push(`/jinxes/${bookingId}/track`)}
             className="w-full py-4 rounded-full text-base font-medium"
             style={{
               background: 'transparent',
@@ -192,17 +155,10 @@ export default function ConfirmedPage() {
           </button>
         </div>
 
-        {/* Go home */}
         <button
           onClick={() => router.replace('/home')}
           className="mt-6 text-sm"
-          style={{
-            color: 'var(--text-muted)',
-            background: 'none',
-            border: 'none',
-            cursor: 'pointer',
-            fontFamily: 'var(--font-body)',
-          }}
+          style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
         >
           Back to home
         </button>
@@ -222,5 +178,18 @@ export default function ConfirmedPage() {
         }
       `}</style>
     </div>
+  )
+}
+
+export default function ConfirmedPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-dvh flex items-center justify-center" style={{ background: '#0A0A0F' }}>
+        <div className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"
+          style={{ borderColor: 'var(--pink)', borderTopColor: 'transparent' }} />
+      </div>
+    }>
+      <ConfirmedContent />
+    </Suspense>
   )
 }
