@@ -1,5 +1,3 @@
-// File: next.config.ts
-
 import type { NextConfig } from 'next'
 
 const nextConfig: NextConfig = {
@@ -13,7 +11,6 @@ const nextConfig: NextConfig = {
       },
     ],
   },
-  // PWA headers
   async headers() {
     return [
       {
@@ -24,7 +21,10 @@ const nextConfig: NextConfig = {
         ],
       },
       {
-        source: '/(.*)',
+        // Fixed: was '/(.*)', which is regex-style and too greedy in Next.js 15+.
+        // '/:path*' is the correct path-to-regexp syntax and won't interfere
+        // with Vercel's internal page manifest resolution.
+        source: '/:path*',
         headers: [
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
