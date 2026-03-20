@@ -12,7 +12,7 @@ export async function middleware(request: NextRequest) {
         getAll() {
           return request.cookies.getAll()
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           )
@@ -26,14 +26,11 @@ export async function middleware(request: NextRequest) {
   )
 
   const { data: { user } } = await supabase.auth.getUser()
-
   const { pathname } = request.nextUrl
 
-  // Public routes — accessible without auth
   const publicRoutes = ['/', '/onboarding', '/auth/login', '/auth/signup', '/auth/verify', '/invite']
   const isPublicRoute = publicRoutes.some(route => pathname.startsWith(route))
 
-  // Auth routes — redirect to home if already logged in
   const authRoutes = ['/auth/login', '/auth/signup', '/onboarding']
   const isAuthRoute = authRoutes.some(route => pathname.startsWith(route))
 
