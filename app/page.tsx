@@ -1,6 +1,5 @@
 // app/page.tsx
 'use client'
-
 import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
@@ -11,9 +10,14 @@ export default function SplashPage() {
   useEffect(() => {
     const check = async () => {
       const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
 
-      await new Promise(r => setTimeout(r, 1800))
+      // Run auth check and minimum display timer IN PARALLEL.
+      // Previously these were sequential: getUser() THEN setTimeout(1800).
+      // Total wait was authLatency + 1800ms. Now it's max(authLatency, 1000ms).
+      const [{ data: { user } }] = await Promise.all([
+        supabase.auth.getUser(),
+        new Promise<void>(r => setTimeout(r, 1000)),
+      ])
 
       if (user) {
         router.replace('/home')
@@ -56,7 +60,6 @@ export default function SplashPage() {
             />
           </svg>
         </div>
-
         <h1
           style={{
             fontFamily: 'var(--font-display)',
@@ -69,7 +72,6 @@ export default function SplashPage() {
         >
           jinxy
         </h1>
-
         <p
           style={{
             fontFamily: 'var(--font-body)',
