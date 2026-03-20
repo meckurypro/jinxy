@@ -1,13 +1,14 @@
+// app/(client)/find/matches/page.tsx
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useSupabase } from '@/lib/hooks/useSupabase'
 import { VendorCard, type VendorCardData } from '@/components/client/VendorCard'
 import { BookingListSkeleton } from '@/components/shared/Skeleton'
 import { formatCurrency } from '@/lib/utils'
 
-export default function MatchesPage() {
+function MatchesContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const bookingId = searchParams.get('booking')
@@ -27,7 +28,6 @@ export default function MatchesPage() {
   const fetchMatches = async () => {
     setLoading(true)
 
-    // Get booking details
     const { data: bookingData } = await supabase
       .from('bookings')
       .select('*')
@@ -36,12 +36,10 @@ export default function MatchesPage() {
 
     if (bookingData) setBooking(bookingData)
 
-    // Get accepted responses with vendor profiles
     const { data: responses } = await supabase
       .from('booking_responses')
       .select(`
-        id,
-        jinx_id,
+        id, jinx_id,
         users!booking_responses_jinx_id_fkey (
           id, username, full_name, avatar_url
         ),
@@ -59,7 +57,7 @@ export default function MatchesPage() {
         const user = r.users as Record<string, unknown>
         const profile = r.jinx_profiles as Record<string, unknown>
         const rate = (profile.min_hourly_rate as number) || (bookingData?.client_budget as number) || 0
-        const fare = 500 + Math.random() * 2000 // Placeholder — replace with actual fare calc
+        const fare = Math.round(500 + Math.random() * 2000)
         return {
           id: r.jinx_id as string,
           username: user.username as string,
@@ -71,7 +69,7 @@ export default function MatchesPage() {
           operating_area: profile.operating_area as string | undefined,
           min_hourly_rate: rate,
           agreed_rate: rate,
-          transport_fare: Math.round(fare),
+          transport_fare: fare,
           total_cost: Math.round(rate + fare),
         }
       })
@@ -88,7 +86,6 @@ export default function MatchesPage() {
     const selectedVendor = vendors.find(v => v.id === selected)
     if (!selectedVendor) return
 
-    // Update booking with selected jinx and move to payment
     const { error } = await supabase
       .from('bookings')
       .update({
@@ -102,10 +99,7 @@ export default function MatchesPage() {
       })
       .eq('id', bookingId)
 
-    if (!error) {
-      router.push(`/find/payment?booking=${bookingId}`)
-    }
-
+    if (!error) router.push(`/find/payment?booking=${bookingId}`)
     setConfirming(false)
   }
 
@@ -124,15 +118,10 @@ export default function MatchesPage() {
 
   return (
     <div className="min-h-dvh flex flex-col" style={{ background: 'var(--bg-base)' }}>
-      {/* Background glow */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 60% 30% at 50% 0%, rgba(255,45,107,0.05) 0%, transparent 60%)',
-        }}
-      />
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(ellipse 60% 30% at 50% 0%, rgba(255,45,107,0.05) 0%, transparent 60%)',
+      }} />
 
-      {/* Header */}
       <div className="relative px-5 pt-14 pb-4">
         <p className="text-xs font-medium uppercase tracking-widest mb-2"
           style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}>
@@ -146,7 +135,6 @@ export default function MatchesPage() {
         </p>
       </div>
 
-      {/* Vendor list */}
       <div className="relative flex-1 px-5 pb-32 space-y-3 overflow-y-auto">
         {vendors.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -159,13 +147,7 @@ export default function MatchesPage() {
             <button
               onClick={() => router.replace('/find')}
               className="px-6 py-3 rounded-full text-sm font-medium"
-              style={{
-                background: 'var(--pink)',
-                color: 'white',
-                border: 'none',
-                cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-              }}
+              style={{ background: 'var(--pink)', color: 'white', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
             >
               Search again
             </button>
@@ -176,27 +158,20 @@ export default function MatchesPage() {
               key={vendor.id}
               vendor={vendor}
               selected={selected === vendor.id}
-              onSelect={() => {
-                setSelected(selected === vendor.id ? null : vendor.id)
-              }}
+              onSelect={() => setSelected(selected === vendor.id ? null : vendor.id)}
               showPrice
             />
           ))
         )}
       </div>
 
-      {/* Sticky bottom CTA */}
       {selected && (
         <div
           className="fixed bottom-0 left-0 right-0 max-w-app mx-auto px-5 pb-8 pt-4"
-          style={{
-            background: 'linear-gradient(to top, var(--bg-base) 70%, transparent)',
-          }}
+          style={{ background: 'linear-gradient(to top, var(--bg-base) 70%, transparent)' }}
         >
-          <div
-            className="flex items-center justify-between mb-3 px-4 py-2 rounded-xl"
-            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-          >
+          <div className="flex items-center justify-between mb-3 px-4 py-2 rounded-xl"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
             <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               Total (service + transport)
             </p>
@@ -222,5 +197,18 @@ export default function MatchesPage() {
         </div>
       )}
     </div>
+  )
+}
+
+export default function MatchesPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-dvh flex items-center justify-center" style={{ background: 'var(--bg-base)' }}>
+        <div className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"
+          style={{ borderColor: 'var(--pink)', borderTopColor: 'transparent' }} />
+      </div>
+    }>
+      <MatchesContent />
+    </Suspense>
   )
 }
