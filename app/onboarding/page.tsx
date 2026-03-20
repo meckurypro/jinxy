@@ -1,7 +1,7 @@
 // app/onboarding/page.tsx
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 
 const slides = [
@@ -37,14 +37,22 @@ export default function OnboardingPage() {
   const [animating, setAnimating] = useState(false)
   const slide = slides[current]
 
-  const goTo = (index: number) => {
-    if (animating || index === current) return
-    setAnimating(true)
-    setTimeout(() => {
-      setCurrent(index)
-      setAnimating(false)
-    }, 250)
-  }
+  // Wrapped in useCallback so the touch effect can safely depend on it
+  const goTo = useCallback((index: number) => {
+    setAnimating(prev => {
+      if (prev) return prev // already animating, bail
+      return true
+    })
+    // Use functional setCurrent to avoid depending on stale `current`
+    setCurrent(prev => {
+      if (index === prev) {
+        setAnimating(false)
+        return prev
+      }
+      setTimeout(() => setAnimating(false), 250)
+      return index
+    })
+  }, [])
 
   const handleNext = () => {
     if (current < slides.length - 1) {
@@ -62,19 +70,39 @@ export default function OnboardingPage() {
 
   useEffect(() => {
     let startX = 0
-    const onTouchStart = (e: TouchEvent) => { startX = e.touches[0].clientX }
+
+    const onTouchStart = (e: TouchEvent) => {
+      startX = e.touches[0].clientX
+    }
+
     const onTouchEnd = (e: TouchEvent) => {
       const diff = startX - e.changedTouches[0].clientX
-      if (diff > 60 && current < slides.length - 1) goTo(current + 1)
-      if (diff < -60 && current > 0) goTo(current - 1)
+      // Use functional form of setCurrent inside handler to read fresh state
+      if (diff > 60) {
+        setCurrent(prev => {
+          if (prev < slides.length - 1) {
+            goTo(prev + 1)
+          }
+          return prev
+        })
+      } else if (diff < -60) {
+        setCurrent(prev => {
+          if (prev > 0) {
+            goTo(prev - 1)
+          }
+          return prev
+        })
+      }
     }
+
     window.addEventListener('touchstart', onTouchStart)
     window.addEventListener('touchend', onTouchEnd)
     return () => {
       window.removeEventListener('touchstart', onTouchStart)
       window.removeEventListener('touchend', onTouchEnd)
     }
-  }, [current, animating])
+    // goTo is stable (useCallback with no deps), so this effect runs once
+  }, [goTo])
 
   return (
     <div
