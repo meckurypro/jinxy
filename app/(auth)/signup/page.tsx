@@ -1,8 +1,8 @@
 // app/(auth)/signup/page.tsx
 'use client'
 
-import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useEffect, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 
@@ -20,9 +20,18 @@ const VIBES = [
   { value: 'private', label: 'Prefer not to say' },
 ]
 
-export default function SignupPage() {
+// Inner component that uses useSearchParams (must be wrapped in Suspense)
+function SignupInner() {
   const router = useRouter()
-  const [step, setStep] = useState<Step>('method')
+  const searchParams = useSearchParams()
+
+  // Read ?step= from URL — used by /auth/callback to resume Google sign-up
+  // at the username step without re-entering email/OTP.
+  const stepParam = searchParams.get('step') as Step | null
+  const validSteps: Step[] = ['method', 'email', 'otp', 'username', 'dob', 'gender', 'vibe']
+  const initialStep: Step = stepParam && validSteps.includes(stepParam) ? stepParam : 'method'
+
+  const [step, setStep] = useState<Step>(initialStep)
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState(['', '', '', '', '', ''])
   const [username, setUsername] = useState('')
@@ -56,7 +65,10 @@ export default function SignupPage() {
   const handleEmailSubmit = async () => {
     if (!email.includes('@')) { setError('Enter a valid email'); return }
     setLoading(true); setError('')
-    const { error } = await supabase.auth.signInWithOtp({ email })
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: true }, // explicitly create new users
+    })
     if (error) { setError(error.message) } else { setStep('otp') }
     setLoading(false)
   }
@@ -123,6 +135,7 @@ export default function SignupPage() {
       username: username.toLowerCase(),
       date_of_birth: dobDate,
       gender,
+      looking_for: vibe, // BUG FIX: vibe was collected but never saved to DB
     })
 
     if (error) { setError(error.message); setLoading(false); return }
@@ -368,6 +381,15 @@ export default function SignupPage() {
         </>}
       </div>
     </div>
+  )
+}
+
+// useSearchParams requires a Suspense boundary in Next.js App Router
+export default function SignupPage() {
+  return (
+    <Suspense>
+      <SignupInner />
+    </Suspense>
   )
 }
 
