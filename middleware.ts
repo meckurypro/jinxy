@@ -30,8 +30,13 @@ export async function middleware(request: NextRequest) {
   const { data: { session } } = await supabase.auth.getSession()
   const user = session?.user ?? null
 
-  // Now that (auth) is renamed to auth/, these prefixes correctly
-  // match the real folder paths on disk.
+  // If logged-in user hits the splash screen, skip it entirely → go straight to app
+  if (user && pathname === '/') {
+    const url = request.nextUrl.clone()
+    url.pathname = '/home'
+    return NextResponse.redirect(url)
+  }
+
   const publicPrefixes = ['/', '/onboarding', '/auth', '/invite']
   const isPublicRoute = publicPrefixes.some(
     prefix => pathname === prefix || pathname.startsWith(prefix + '/')
