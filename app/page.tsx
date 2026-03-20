@@ -4,125 +4,112 @@ import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import Image from 'next/image'
 
-type Phase = 'logo' | 'crossfade' | 'brand' | 'done'
-
 export default function SplashPage() {
   const router = useRouter()
-  const [phase, setPhase] = useState<Phase>('logo')
+  const [visible, setVisible] = useState(false)
+  const [wordmarkVisible, setWordmarkVisible] = useState(false)
+  const [taglineVisible, setTaglineVisible] = useState(false)
+  const [exiting, setExiting] = useState(false)
 
   useEffect(() => {
-    const t1 = setTimeout(() => setPhase('crossfade'), 1000)
-    const t2 = setTimeout(() => setPhase('brand'), 1400)
-    const t3 = setTimeout(() => {
-      setPhase('done')
+    // Staggered entrance — each element fades in separately
+    const t1 = setTimeout(() => setVisible(true), 100)         // logo fades in
+    const t2 = setTimeout(() => setWordmarkVisible(true), 600) // wordmark slides up
+    const t3 = setTimeout(() => setTaglineVisible(true), 1000) // tagline fades in
+    const t4 = setTimeout(() => setExiting(true), 2000)        // everything fades out
+    const t5 = setTimeout(() => {
       const seen = localStorage.getItem('jinxy-onboarded')
       router.replace(seen ? '/auth/login' : '/onboarding')
-    }, 3000)
+    }, 2600)
 
     return () => {
-      clearTimeout(t1)
-      clearTimeout(t2)
-      clearTimeout(t3)
+      clearTimeout(t1); clearTimeout(t2); clearTimeout(t3)
+      clearTimeout(t4); clearTimeout(t5)
     }
   }, [router])
 
   return (
-    <div className="relative w-full min-h-dvh overflow-hidden">
+    <div
+      style={{
+        position: 'relative',
+        width: '100%',
+        minHeight: '100dvh',
+        background: '#B8153F', // deep brand crimson — matches app dark palette
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 24,
+        opacity: exiting ? 0 : 1,
+        transition: exiting ? 'opacity 600ms cubic-bezier(0.4,0,0.2,1)' : 'none',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Subtle radial light — gives depth without distraction */}
+      <div style={{
+        position: 'absolute',
+        inset: 0,
+        background: 'radial-gradient(ellipse 60% 50% at 50% 40%, rgba(255,255,255,0.08) 0%, transparent 70%)',
+        pointerEvents: 'none',
+      }} />
 
-      {/* === PHASE 1: White screen + heart logo === */}
-      <div
-        className="absolute inset-0 flex items-center justify-center"
-        style={{
-          background: '#FFFFFF',
-          opacity: phase === 'logo' ? 1 : phase === 'crossfade' ? 0 : 0,
-          transition: phase === 'crossfade' ? 'opacity 400ms ease' : 'none',
-          zIndex: 2,
-        }}
-      >
-        <div
-          style={{
-            opacity: phase === 'logo' ? 1 : 0,
-            transform: phase === 'logo' ? 'scale(1)' : 'scale(0.92)',
-            transition: 'opacity 600ms ease, transform 600ms ease',
-            animation: phase === 'logo' ? 'fadeScaleIn 700ms ease forwards' : undefined,
-          }}
-        >
-          <Image
-            src="/icons/jinxy.png"
-            alt="Jinxy"
-            width={120}
-            height={120}
-            priority
-            style={{ borderRadius: 28 }}
-          />
-        </div>
+      {/* Heart logo — scales up from 80% with a gentle spring feel */}
+      <div style={{
+        opacity: visible ? 1 : 0,
+        transform: visible ? 'scale(1) translateY(0)' : 'scale(0.8) translateY(8px)',
+        transition: 'opacity 700ms cubic-bezier(0.34,1.56,0.64,1), transform 700ms cubic-bezier(0.34,1.56,0.64,1)',
+      }}>
+        <Image
+          src="/icons/jinxy.png"
+          alt="Jinxy"
+          width={96}
+          height={96}
+          priority
+          style={{ borderRadius: 22, display: 'block' }}
+        />
       </div>
 
-      {/* === PHASE 2: Dark pink screen + centered white wordmark === */}
-      <div
-        className="absolute inset-0 flex flex-col items-center justify-center gap-4"
-        style={{
-          background: '#C4174A', // darker, richer pink matching the app's deep brand color
-          opacity: phase === 'brand' || phase === 'done' ? 1 : 0,
-          transition: 'opacity 500ms ease',
-          zIndex: 1,
-        }}
-      >
-        {/* Subtle vignette for depth */}
-        <div
+      {/* Wordmark — slides up from below logo */}
+      <div style={{
+        opacity: wordmarkVisible ? 1 : 0,
+        transform: wordmarkVisible ? 'translateY(0)' : 'translateY(20px)',
+        transition: 'opacity 700ms cubic-bezier(0.4,0,0.2,1), transform 700ms cubic-bezier(0.4,0,0.2,1)',
+        // Force the image to render centered regardless of PNG canvas padding
+        display: 'flex',
+        justifyContent: 'center',
+        width: '100%',
+        paddingLeft: 24,
+        paddingRight: 24,
+      }}>
+        <Image
+          src="/icons/WBrandName.png"
+          alt="jinxy"
+          width={160}
+          height={64}
+          priority
           style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'radial-gradient(ellipse 80% 60% at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.15) 100%)',
-            pointerEvents: 'none',
+            objectFit: 'contain',
+            objectPosition: 'center',
+            display: 'block',
           }}
         />
-
-        {/* Centered white wordmark */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            alignItems: 'center',
-            width: '100%',
-            opacity: phase === 'brand' || phase === 'done' ? 1 : 0,
-            transform: phase === 'brand' || phase === 'done' ? 'translateY(0)' : 'translateY(16px)',
-            transition: 'opacity 600ms ease 200ms, transform 600ms ease 200ms',
-          }}
-        >
-          <Image
-            src="/icons/WBrandName.png"
-            alt="jinxy"
-            width={180}
-            height={72}
-            priority
-            style={{ objectFit: 'contain' }}
-          />
-        </div>
-
-        {/* Tagline */}
-        <p
-          style={{
-            fontFamily: 'var(--font-body)',
-            fontSize: 13,
-            color: 'rgba(255,255,255,0.6)',
-            letterSpacing: '0.08em',
-            textAlign: 'center',
-            opacity: phase === 'brand' || phase === 'done' ? 1 : 0,
-            transform: phase === 'brand' || phase === 'done' ? 'translateY(0)' : 'translateY(12px)',
-            transition: 'opacity 600ms ease 500ms, transform 600ms ease 500ms',
-          }}
-        >
-          Want a Jinx? Go Jinxy.
-        </p>
       </div>
 
-      <style>{`
-        @keyframes fadeScaleIn {
-          from { opacity: 0; transform: scale(0.88); }
-          to   { opacity: 1; transform: scale(1); }
-        }
-      `}</style>
+      {/* Tagline */}
+      <p style={{
+        fontFamily: 'var(--font-body)',
+        fontSize: 12,
+        color: 'rgba(255,255,255,0.55)',
+        letterSpacing: '0.1em',
+        textTransform: 'uppercase',
+        textAlign: 'center',
+        opacity: taglineVisible ? 1 : 0,
+        transform: taglineVisible ? 'translateY(0)' : 'translateY(10px)',
+        transition: 'opacity 600ms ease, transform 600ms ease',
+        margin: 0,
+      }}>
+        Want a Jinx? Go Jinxy.
+      </p>
     </div>
   )
 }
