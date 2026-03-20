@@ -11,11 +11,8 @@ export default function SplashPage() {
   const [phase, setPhase] = useState<Phase>('logo')
 
   useEffect(() => {
-    // Phase 1: show white + heart logo
     const t1 = setTimeout(() => setPhase('crossfade'), 1000)
-    // Phase 2: crossfade transition
     const t2 = setTimeout(() => setPhase('brand'), 1400)
-    // Phase 3: show pink + wordmark, then route out
     const t3 = setTimeout(() => {
       setPhase('done')
       const seen = localStorage.getItem('jinxy-onboarded')
@@ -61,29 +58,33 @@ export default function SplashPage() {
         </div>
       </div>
 
-      {/* === PHASE 3: Pink screen + white wordmark === */}
+      {/* === PHASE 2: Dark pink screen + centered white wordmark === */}
       <div
-        className="absolute inset-0 flex flex-col items-center justify-center gap-6"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-4"
         style={{
-          background: '#FF2D6B',
+          background: '#C4174A', // darker, richer pink matching the app's deep brand color
           opacity: phase === 'brand' || phase === 'done' ? 1 : 0,
           transition: 'opacity 500ms ease',
           zIndex: 1,
         }}
       >
-        {/* Subtle radial glow behind wordmark */}
+        {/* Subtle vignette for depth */}
         <div
           style={{
             position: 'absolute',
             inset: 0,
-            background: 'radial-gradient(ellipse 70% 50% at 50% 50%, rgba(255,255,255,0.12) 0%, transparent 70%)',
+            background: 'radial-gradient(ellipse 80% 60% at 50% 50%, rgba(255,255,255,0.06) 0%, rgba(0,0,0,0.15) 100%)',
             pointerEvents: 'none',
           }}
         />
 
-        {/* White wordmark */}
+        {/* Centered white wordmark */}
         <div
           style={{
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            width: '100%',
             opacity: phase === 'brand' || phase === 'done' ? 1 : 0,
             transform: phase === 'brand' || phase === 'done' ? 'translateY(0)' : 'translateY(16px)',
             transition: 'opacity 600ms ease 200ms, transform 600ms ease 200ms',
@@ -92,8 +93,8 @@ export default function SplashPage() {
           <Image
             src="/icons/WBrandName.png"
             alt="jinxy"
-            width={200}
-            height={80}
+            width={180}
+            height={72}
             priority
             style={{ objectFit: 'contain' }}
           />
@@ -104,8 +105,9 @@ export default function SplashPage() {
           style={{
             fontFamily: 'var(--font-body)',
             fontSize: 13,
-            color: 'rgba(255,255,255,0.7)',
+            color: 'rgba(255,255,255,0.6)',
             letterSpacing: '0.08em',
+            textAlign: 'center',
             opacity: phase === 'brand' || phase === 'done' ? 1 : 0,
             transform: phase === 'brand' || phase === 'done' ? 'translateY(0)' : 'translateY(12px)',
             transition: 'opacity 600ms ease 500ms, transform 600ms ease 500ms',
