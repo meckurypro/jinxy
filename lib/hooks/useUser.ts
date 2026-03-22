@@ -1,3 +1,4 @@
+// lib/hooks/useUser.ts
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -17,6 +18,15 @@ interface UserProfile {
   dark_mode: boolean
   jinxy_credits: number
   credits_expiry_date: string | null
+  referral_code: string        // unique code used in referral links
+  referred_by: string | null   // user id of whoever referred this user
+  country: string | null
+  city: string | null
+  date_of_birth: string | null
+  gender: string | null
+  looking_for: string | null
+  last_active_at: string | null
+  created_at: string
 }
 
 interface UseUserReturn {
