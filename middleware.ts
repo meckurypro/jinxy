@@ -1,65 +1,46 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
 
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl
 
-  let supabaseResponse = NextResponse.next({ request })
+  // Read session purely from cookies — zero network calls to Supabase.
+  // The cookie name follows Supabase's naming convention: sb-<project-ref>-auth-token.
+  // This is safe for routing decisions; actual session verification still happens
+  // server-side in route handlers and client components via supabase.auth.getUser().
+  const projectRef = process.env.NEXT_PUBLIC_SUPABASE_URL!
+    .replace('https://', '')
+    .split('.')[0]
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          )
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
+  const hasSession =
+    request.cookies.has(`sb-${projectRef}-auth-token`) ||
+    request.cookies.has(`sb-${projectRef}-auth-token.0`) // chunked cookie fallback
+
+  // Logged-in user hits splash → skip it, go straight to app
+  if (hasSession && pathname === '/') {
+    return NextResponse.redirect(new URL('/home', request.url))
+  }
+
+  const authRoutes = ['/auth/login', '/auth/signup', '/onboarding']
+  const isAuthRoute = authRoutes.some(
+    r => pathname === r || pathname.startsWith(r + '/')
   )
 
-  const { data: { session } } = await supabase.auth.getSession()
-  const user = session?.user ?? null
-
-  // If logged-in user hits the splash screen, skip it entirely → go straight to app
-  if (user && pathname === '/') {
-    const url = request.nextUrl.clone()
-    url.pathname = '/home'
-    return NextResponse.redirect(url)
+  // Logged-in user hits auth/onboarding route → send to app
+  if (hasSession && isAuthRoute) {
+    return NextResponse.redirect(new URL('/home', request.url))
   }
 
   const publicPrefixes = ['/', '/onboarding', '/auth', '/invite']
   const isPublicRoute = publicPrefixes.some(
-    prefix => pathname === prefix || pathname.startsWith(prefix + '/')
+    p => pathname === p || pathname.startsWith(p + '/')
   )
 
-  const authPrefixes = ['/auth/login', '/auth/signup', '/onboarding']
-  const isAuthRoute = authPrefixes.some(
-    prefix => pathname === prefix || pathname.startsWith(prefix + '/')
-  )
-
-  if (user && isAuthRoute) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/home'
-    return NextResponse.redirect(url)
+  // Unauthenticated user hits a protected route → send to login
+  if (!hasSession && !isPublicRoute) {
+    return NextResponse.redirect(new URL('/auth/login', request.url))
   }
 
-  if (!user && !isPublicRoute) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/auth/login'
-    return NextResponse.redirect(url)
-  }
-
-  return supabaseResponse
+  return NextResponse.next()
 }
 
 export const config = {
