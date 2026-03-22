@@ -1,6 +1,7 @@
+// app/(client)/account/edit/page.tsx
 'use client'
 
-import { useState, useRef, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/hooks/useUser'
 import { useSupabase } from '@/lib/hooks/useSupabase'
@@ -10,47 +11,19 @@ export default function EditProfilePage() {
   const router = useRouter()
   const { profile, refresh } = useUser()
   const supabase = useSupabase()
-  const fileRef = useRef<HTMLInputElement>(null)
 
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState('')
-  const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
-  // Populate fields once profile loads
   useEffect(() => {
     if (profile) {
       setFullName(profile.full_name ?? '')
       setUsername(profile.username ?? '')
-      setAvatarUrl(profile.avatar_url ?? '')
     }
   }, [profile?.id])
-
-  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !profile?.id) return
-
-    setUploading(true)
-    const ext = file.name.split('.').pop()
-    const path = `avatars/${profile.id}/avatar.${ext}`
-
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(path, file, { upsert: true })
-
-    if (!uploadError) {
-      const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-      const url = `${data.publicUrl}?t=${Date.now()}`
-      setAvatarUrl(url)
-      await supabase.from('users').update({ avatar_url: url }).eq('id', profile.id)
-    }
-
-    setUploading(false)
-    if (fileRef.current) fileRef.current.value = ''
-  }
 
   const handleSave = async () => {
     if (!profile?.id) return
@@ -60,7 +33,6 @@ export default function EditProfilePage() {
     setSaving(true)
     setError('')
 
-    // Check uniqueness only if username changed
     if (username !== profile.username) {
       const { data: taken } = await supabase
         .from('users')
@@ -92,8 +64,8 @@ export default function EditProfilePage() {
 
     await refresh()
     setSaved(true)
-    setTimeout(() => { setSaved(false); router.back() }, 1200)
     setSaving(false)
+    setTimeout(() => { setSaved(false); router.back() }, 1200)
   }
 
   const inputStyle: React.CSSProperties = {
@@ -142,44 +114,28 @@ export default function EditProfilePage() {
 
       <div className="px-5 pb-8 space-y-6">
 
-        {/* Avatar */}
-        <div className="flex flex-col items-center gap-3">
-          <div className="relative">
-            <Avatar
-              src={avatarUrl}
-              name={fullName || profile?.username || 'U'}
-              size={88}
-              showRing
-            />
-            <button
-              onClick={() => fileRef.current?.click()}
-              disabled={uploading}
-              className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full flex items-center justify-center"
-              style={{
-                background: 'var(--pink)',
-                border: '2px solid var(--bg-base)',
-                cursor: uploading ? 'not-allowed' : 'pointer',
-              }}
-            >
-              {uploading ? (
-                <div className="w-3 h-3 rounded-full border border-t-transparent animate-spin border-white" />
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-                  <path d="M7 2v10M2 7h10" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              )}
-            </button>
-          </div>
-          <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-            Tap to change photo
-          </p>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleAvatarChange}
+        {/* Avatar — read only */}
+        <div className="flex flex-col items-center gap-2">
+          <Avatar
+            src={profile?.avatar_url}
+            name={profile?.full_name || profile?.username || 'U'}
+            size={88}
           />
+          {/* Change DP link — goes back to account page where AvatarViewer lives */}
+          <button
+            onClick={() => router.back()}
+            style={{
+              background: 'none',
+              border: 'none',
+              cursor: 'pointer',
+              color: 'var(--pink)',
+              fontFamily: 'var(--font-body)',
+              fontSize: 13,
+              fontWeight: 500,
+            }}
+          >
+            Change display photo
+          </button>
         </div>
 
         {/* Fields */}
@@ -198,17 +154,13 @@ export default function EditProfilePage() {
           <div>
             <label style={labelStyle}>Username</label>
             <div style={{ position: 'relative' }}>
-              <span
-                style={{
-                  position: 'absolute',
-                  left: 16,
-                  top: '50%',
-                  transform: 'translateY(-50%)',
-                  color: 'var(--text-muted)',
-                  fontFamily: 'var(--font-body)',
-                  fontSize: 15,
-                }}
-              >@</span>
+              <span style={{
+                position: 'absolute', left: 16, top: '50%',
+                transform: 'translateY(-50%)',
+                color: 'var(--text-muted)',
+                fontFamily: 'var(--font-body)',
+                fontSize: 15,
+              }}>@</span>
               <input
                 type="text"
                 style={{ ...inputStyle, paddingLeft: 28 }}
@@ -236,10 +188,7 @@ export default function EditProfilePage() {
         </div>
 
         {error && (
-          <p
-            className="text-sm text-center"
-            style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}
-          >
+          <p className="text-sm text-center" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}>
             {error}
           </p>
         )}
