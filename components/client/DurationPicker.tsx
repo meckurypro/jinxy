@@ -1,15 +1,11 @@
+// components/client/DurationPicker.tsx
 'use client'
 
 import { formatCurrency, getTierColor } from '@/lib/utils'
 
 export type DurationTier = 'ruby' | 'emerald' | 'gold' | 'platinum' | 'topaz' | 'diamond'
 
-const TIERS: {
-  id: DurationTier
-  name: string
-  hours: number
-  discount: number
-}[] = [
+const TIERS: { id: DurationTier; name: string; hours: number; discount: number }[] = [
   { id: 'ruby',     name: 'Ruby',     hours: 1,  discount: 0 },
   { id: 'emerald',  name: 'Emerald',  hours: 3,  discount: 0 },
   { id: 'gold',     name: 'Gold',     hours: 6,  discount: 5 },
@@ -24,17 +20,25 @@ function formatHours(hours: number): string {
   return `${hours / 24} days`
 }
 
-interface DurationPickerProps {
+export interface DurationPickerProps {
   selected: DurationTier
   onChange: (tier: DurationTier) => void
   hourlyRate?: number
+  /** Tier to highlight with a Free badge — used when a free Jinx reward is active */
+  highlightTier?: DurationTier
 }
 
-export function DurationPicker({ selected, onChange, hourlyRate = 0 }: DurationPickerProps) {
+export function DurationPicker({
+  selected,
+  onChange,
+  hourlyRate = 0,
+  highlightTier,
+}: DurationPickerProps) {
   return (
     <div className="space-y-2">
       {TIERS.map(tier => {
         const isSelected = selected === tier.id
+        const isHighlighted = highlightTier === tier.id
         const color = getTierColor(tier.id)
         const basePrice = hourlyRate * tier.hours
         const finalPrice = basePrice * (1 - tier.discount / 100)
@@ -50,9 +54,8 @@ export function DurationPicker({ selected, onChange, hourlyRate = 0 }: DurationP
               boxShadow: isSelected ? `0 0 0 3px ${color}15` : 'none',
             }}
           >
-            {/* Left — tier name + hours */}
+            {/* Left */}
             <div className="flex items-center gap-3">
-              {/* Color dot */}
               <div
                 className="w-3 h-3 rounded-full flex-shrink-0"
                 style={{
@@ -61,29 +64,36 @@ export function DurationPicker({ selected, onChange, hourlyRate = 0 }: DurationP
                 }}
               />
               <div className="text-left">
-                <p
-                  className="text-sm font-medium"
-                  style={{
-                    color: isSelected ? color : 'var(--text-primary)',
-                    fontFamily: 'var(--font-body)',
-                  }}
-                >
-                  {tier.name}
-                </p>
-                <p
-                  className="text-xs"
-                  style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}
-                >
+                <div className="flex items-center gap-2">
+                  <p
+                    className="text-sm font-medium"
+                    style={{
+                      color: isSelected ? color : 'var(--text-primary)',
+                      fontFamily: 'var(--font-body)',
+                    }}
+                  >
+                    {tier.name}
+                  </p>
+                  {isHighlighted && (
+                    <span style={{
+                      fontSize: 10, fontWeight: 600,
+                      fontFamily: 'var(--font-body)',
+                      color: '#00D97E',
+                      background: 'rgba(0,217,126,0.12)',
+                      border: '1px solid rgba(0,217,126,0.25)',
+                      borderRadius: 9999,
+                      padding: '1px 6px',
+                      lineHeight: 1.5,
+                    }}>
+                      🎁 Free
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                   {formatHours(tier.hours)}
                   {tier.discount > 0 && (
-                    <span
-                      className="ml-2 px-1.5 py-0.5 rounded-full text-xs"
-                      style={{
-                        background: `${color}20`,
-                        color,
-                        fontSize: 10,
-                      }}
-                    >
+                    <span className="ml-2 px-1.5 py-0.5 rounded-full"
+                      style={{ background: `${color}20`, color, fontSize: 10 }}>
                       -{tier.discount}%
                     </span>
                   )}
@@ -91,26 +101,30 @@ export function DurationPicker({ selected, onChange, hourlyRate = 0 }: DurationP
               </div>
             </div>
 
-            {/* Right — price or checkmark */}
+            {/* Right */}
             <div className="flex items-center gap-2">
               {hourlyRate > 0 && (
-                <p
-                  className="text-sm font-medium"
-                  style={{
-                    color: isSelected ? color : 'var(--text-secondary)',
-                    fontFamily: 'var(--font-body)',
-                  }}
-                >
+                <p className="text-sm font-medium" style={{
+                  color: isSelected ? color : 'var(--text-secondary)',
+                  fontFamily: 'var(--font-body)',
+                  textDecoration: isHighlighted ? 'line-through' : 'none',
+                  opacity: isHighlighted ? 0.4 : 1,
+                }}>
                   {formatCurrency(finalPrice)}
                 </p>
               )}
+              {isHighlighted && hourlyRate > 0 && (
+                <p className="text-sm font-semibold"
+                  style={{ color: '#00D97E', fontFamily: 'var(--font-body)' }}>
+                  Free
+                </p>
+              )}
               {isSelected && (
-                <div
-                  className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
-                  style={{ background: color }}
-                >
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: color }}>
                   <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5"
+                      strokeLinecap="round" strokeLinejoin="round" />
                   </svg>
                 </div>
               )}
