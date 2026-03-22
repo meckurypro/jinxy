@@ -33,7 +33,6 @@ export default function CompleteProfilePage() {
   const progress = (stepIndex / (STEPS.length - 1)) * 100
 
   useEffect(() => {
-    // Verify user is authenticated and get their Google metadata
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (!user) {
         router.replace('/auth/login')
@@ -86,7 +85,6 @@ export default function CompleteProfilePage() {
 
     const dobDate = `${dob.year}-${dob.month.padStart(2, '0')}-${dob.day.padStart(2, '0')}`
 
-    // Upsert public user profile — works whether row exists or not
     const { error: upsertError } = await supabase.from('users').upsert({
       id: user.id,
       email: user.email,
@@ -95,6 +93,7 @@ export default function CompleteProfilePage() {
       username: username.toLowerCase(),
       date_of_birth: dobDate,
       gender,
+      looking_for: vibe,
       role: 'client',
       current_mode: 'client',
       dark_mode: true,
@@ -107,10 +106,14 @@ export default function CompleteProfilePage() {
       return
     }
 
-    // Upsert client profile
     await supabase.from('client_profiles').upsert({ user_id: user.id })
 
-    // Mark onboarded so splash doesn't send them back
+    // Set the profile-complete cookie so middleware knows this user is fully
+    // onboarded. Path=/ ensures it's sent on every request. 1-year expiry.
+    // This mirrors what /auth/callback sets for returning complete users.
+    document.cookie = 'jinxy-profile-complete=1; path=/; max-age=31536000; SameSite=Lax'
+
+    // Keep localStorage flag for the splash screen redirect logic
     localStorage.setItem('jinxy-onboarded', 'true')
 
     router.replace('/home')
@@ -160,7 +163,18 @@ export default function CompleteProfilePage() {
     justifyContent: 'space-between',
   })
 
-  // ─── Render ───────────────────────────────────────────────
+  const checkmark = (
+    <div style={{
+      width: 20, height: 20, borderRadius: '50%',
+      background: 'var(--pink)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  )
+
   return (
     <div className="flex flex-col min-h-dvh" style={{ background: 'var(--bg-base)' }}>
 
@@ -192,7 +206,6 @@ export default function CompleteProfilePage() {
           </button>
         )}
 
-        {/* Google user greeting — only on first step */}
         {step === 'username' && userMeta.name && (
           <div className="flex items-center gap-3 mb-6">
             {userMeta.avatar && (
@@ -204,9 +217,7 @@ export default function CompleteProfilePage() {
               />
             )}
             <div>
-              <p style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-muted)' }}>
-                Signed in as
-              </p>
+              <p style={{ fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--text-muted)' }}>Signed in as</p>
               <p style={{ fontFamily: 'var(--font-body)', fontSize: 15, fontWeight: 500, color: 'var(--text-primary)' }}>
                 {userMeta.name}
               </p>
@@ -323,17 +334,7 @@ export default function CompleteProfilePage() {
               style={secondaryBtn(gender === g)}
             >
               <span className="capitalize">{g}</span>
-              {gender === g && (
-                <div style={{
-                  width: 20, height: 20, borderRadius: '50%',
-                  background: 'var(--pink)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              )}
+              {gender === g && checkmark}
             </button>
           ))}
           <p className="text-center text-xs pt-2" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
@@ -350,17 +351,7 @@ export default function CompleteProfilePage() {
               style={secondaryBtn(vibe === v.value)}
             >
               <span>{v.label}</span>
-              {vibe === v.value && (
-                <div style={{
-                  width: 20, height: 20, borderRadius: '50%',
-                  background: 'var(--pink)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              )}
+              {vibe === v.value && checkmark}
             </button>
           ))}
           <p className="text-center text-xs pt-1" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
