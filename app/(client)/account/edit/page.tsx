@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/hooks/useUser'
 import { useSupabase } from '@/lib/hooks/useSupabase'
@@ -12,13 +12,22 @@ export default function EditProfilePage() {
   const supabase = useSupabase()
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const [fullName, setFullName] = useState(profile?.full_name ?? '')
-  const [username, setUsername] = useState(profile?.username ?? '')
+  const [fullName, setFullName] = useState('')
+  const [username, setUsername] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState('')
   const [uploading, setUploading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
   const [saved, setSaved] = useState(false)
-  const [avatarUrl, setAvatarUrl] = useState(profile?.avatar_url ?? '')
+  const [error, setError] = useState('')
+
+  // Populate fields once profile loads
+  useEffect(() => {
+    if (profile) {
+      setFullName(profile.full_name ?? '')
+      setUsername(profile.username ?? '')
+      setAvatarUrl(profile.avatar_url ?? '')
+    }
+  }, [profile?.id])
 
   const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -34,16 +43,13 @@ export default function EditProfilePage() {
 
     if (!uploadError) {
       const { data } = supabase.storage.from('avatars').getPublicUrl(path)
-      const url = data.publicUrl + `?t=${Date.now()}`
+      const url = `${data.publicUrl}?t=${Date.now()}`
       setAvatarUrl(url)
-
-      await supabase
-        .from('users')
-        .update({ avatar_url: url })
-        .eq('id', profile.id)
+      await supabase.from('users').update({ avatar_url: url }).eq('id', profile.id)
     }
 
     setUploading(false)
+    if (fileRef.current) fileRef.current.value = ''
   }
 
   const handleSave = async () => {
@@ -54,16 +60,16 @@ export default function EditProfilePage() {
     setSaving(true)
     setError('')
 
-    // Check username uniqueness (only if changed)
+    // Check uniqueness only if username changed
     if (username !== profile.username) {
-      const { data } = await supabase
+      const { data: taken } = await supabase
         .from('users')
         .select('id')
         .eq('username', username.toLowerCase())
         .neq('id', profile.id)
         .maybeSingle()
 
-      if (data) {
+      if (taken) {
         setError('Username already taken')
         setSaving(false)
         return
@@ -80,13 +86,37 @@ export default function EditProfilePage() {
 
     if (updateError) {
       setError(updateError.message)
-    } else {
-      await refresh()
-      setSaved(true)
-      setTimeout(() => { setSaved(false); router.back() }, 1000)
+      setSaving(false)
+      return
     }
 
+    await refresh()
+    setSaved(true)
+    setTimeout(() => { setSaved(false); router.back() }, 1200)
     setSaving(false)
+  }
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%',
+    padding: '14px 16px',
+    background: 'var(--bg-input)',
+    border: '1.5px solid var(--border)',
+    borderRadius: 14,
+    color: 'var(--text-primary)',
+    fontFamily: 'var(--font-body)',
+    fontSize: 15,
+    outline: 'none',
+  }
+
+  const labelStyle: React.CSSProperties = {
+    display: 'block',
+    fontSize: 12,
+    fontWeight: 500,
+    color: 'var(--text-muted)',
+    fontFamily: 'var(--font-body)',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+    letterSpacing: '0.06em',
   }
 
   return (
@@ -100,7 +130,8 @@ export default function EditProfilePage() {
           style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}
         >
           <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-            <path d="M12 4L6 10L12 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M12 4L6 10L12 16" stroke="currentColor" strokeWidth="1.5"
+              strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <span className="text-sm" style={{ fontFamily: 'var(--font-body)' }}>Back</span>
         </button>
@@ -115,7 +146,7 @@ export default function EditProfilePage() {
         <div className="flex flex-col items-center gap-3">
           <div className="relative">
             <Avatar
-              src={avatarUrl || profile?.avatar_url}
+              src={avatarUrl}
               name={fullName || profile?.username || 'U'}
               size={88}
               showRing
@@ -142,33 +173,45 @@ export default function EditProfilePage() {
           <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
             Tap to change photo
           </p>
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarChange} />
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleAvatarChange}
+          />
         </div>
 
         {/* Fields */}
         <div className="space-y-4">
           <div>
-            <label className="input-label">Full name</label>
+            <label style={labelStyle}>Full name</label>
             <input
               type="text"
-              className="input"
+              style={inputStyle}
               placeholder="Your name"
               value={fullName}
-              onChange={e => setFullName(e.target.value)}
+              onChange={e => { setFullName(e.target.value); setError('') }}
             />
           </div>
 
           <div>
-            <label className="input-label">Username</label>
-            <div className="input-wrapper">
+            <label style={labelStyle}>Username</label>
+            <div style={{ position: 'relative' }}>
               <span
-                className="absolute left-4 top-1/2 -translate-y-1/2 text-sm"
-                style={{ color: 'var(--text-muted)' }}
+                style={{
+                  position: 'absolute',
+                  left: 16,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-body)',
+                  fontSize: 15,
+                }}
               >@</span>
               <input
                 type="text"
-                className="input"
-                style={{ paddingLeft: 28 }}
+                style={{ ...inputStyle, paddingLeft: 28 }}
                 placeholder="yourhandle"
                 value={username}
                 onChange={e => { setUsername(e.target.value.toLowerCase()); setError('') }}
@@ -179,36 +222,40 @@ export default function EditProfilePage() {
           </div>
 
           <div>
-            <label className="input-label">Email</label>
+            <label style={labelStyle}>Email</label>
             <input
               type="email"
-              className="input"
+              style={{ ...inputStyle, opacity: 0.5, cursor: 'not-allowed' }}
               value={profile?.email ?? ''}
               disabled
-              style={{ opacity: 0.5, cursor: 'not-allowed' }}
             />
-            <p className="mt-1 text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+            <p className="mt-1.5 text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               Contact support to change your email
             </p>
           </div>
         </div>
 
         {error && (
-          <p className="text-sm text-center" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}>
+          <p
+            className="text-sm text-center"
+            style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}
+          >
             {error}
           </p>
         )}
 
-        {/* Save button */}
+        {/* Save */}
         <button
           onClick={handleSave}
           disabled={saving || saved}
           className="w-full py-4 rounded-full text-base font-semibold text-white"
           style={{
             background: saved ? '#00D97E' : 'var(--pink)',
-            boxShadow: saved ? '0 4px 20px rgba(0,217,126,0.35)' : '0 4px 20px rgba(255,45,107,0.35)',
+            boxShadow: saved
+              ? '0 4px 20px rgba(0,217,126,0.35)'
+              : '0 4px 20px rgba(255,45,107,0.35)',
             border: 'none',
-            cursor: saving ? 'not-allowed' : 'pointer',
+            cursor: (saving || saved) ? 'not-allowed' : 'pointer',
             fontFamily: 'var(--font-body)',
             opacity: saving ? 0.7 : 1,
             transition: 'all 300ms ease',
