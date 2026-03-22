@@ -92,9 +92,11 @@ export default function HomePage() {
     return () => clearTimeout(t)
   }, [])
 
-  // Cycle through greeting lines every 6 seconds with a fade transition
+  // Cycle through greeting lines every 20 minutes with a fade transition.
+  // Only starts after the display name has loaded so the first line always
+  // shows the correct name for its full duration.
   useEffect(() => {
-    if (lines.length <= 1) return
+    if (!displayName || lines.length <= 1) return
     const interval = setInterval(() => {
       // Fade out
       setLineVisible(false)
@@ -103,9 +105,9 @@ export default function HomePage() {
         // Fade back in
         setLineVisible(true)
       }, 400)
-    }, 6000)
+    }, 20 * 60 * 1000) // 20 minutes
     return () => clearInterval(interval)
-  }, [lines.length])
+  }, [displayName, lines.length])
 
   const currentLine = lines[lineIndex].replace('{name}', displayName || 'you')
 
