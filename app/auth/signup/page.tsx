@@ -1,4 +1,4 @@
-// app/(auth)/signup/page.tsx
+// app/auth/signup/page.tsx
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
@@ -20,32 +20,38 @@ const VIBES = [
   { value: 'private', label: 'Prefer not to say' },
 ]
 
-// Inner component that uses useSearchParams (must be wrapped in Suspense)
 function SignupInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
 
-  // Read ?step= from URL — used by /auth/callback to resume Google sign-up
-  // at the username step without re-entering email/OTP.
   const stepParam = searchParams.get('step') as Step | null
   const validSteps: Step[] = ['method', 'email', 'otp', 'username', 'dob', 'gender', 'vibe']
   const initialStep: Step = stepParam && validSteps.includes(stepParam) ? stepParam : 'method'
 
   const [step, setStep] = useState<Step>(initialStep)
   const [email, setEmail] = useState('')
-  const [otp, setOtp] = useState(['', '', '', '', '', ''])
+  const [otp, setOtp] = useState('')         // single string, up to 8 digits
+  const [otpError, setOtpError] = useState('')
   const [username, setUsername] = useState('')
   const [dob, setDob] = useState({ day: '', month: '', year: '' })
   const [gender, setGender] = useState<'male' | 'female' | ''>('')
   const [vibe, setVibe] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
 
   const supabase = createClient()
 
   const progress = STEP_INDEX[step] > 0
     ? ((STEP_INDEX[step] - 1) / (TOTAL_STEPS - 1)) * 100
     : 0
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendCooldown])
 
   const goBack = () => {
     const steps: Step[] = ['method', 'email', 'otp', 'username', 'dob', 'gender', 'vibe']
@@ -67,38 +73,48 @@ function SignupInner() {
     setLoading(true); setError('')
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { shouldCreateUser: true }, // explicitly create new users
+      options: { shouldCreateUser: true },
     })
-    if (error) { setError(error.message) } else { setStep('otp') }
+    if (error) { setError(error.message) } else {
+      setStep('otp')
+      setResendCooldown(60)
+    }
     setLoading(false)
   }
 
-  const handleOtpChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return
-    const newOtp = [...otp]
-    newOtp[index] = value.slice(-1)
-    setOtp(newOtp)
-    if (value && index < 5) document.getElementById(`sotp-${index + 1}`)?.focus()
-    if (newOtp.every(d => d) && newOtp.join('').length === 6) verifyOtp(newOtp.join(''))
-  }
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0)
-      document.getElementById(`sotp-${index - 1}`)?.focus()
+  const handleOtpChange = (value: string) => {
+    // Only allow digits, max 8
+    const clean = value.replace(/\D/g, '').slice(0, 8)
+    setOtp(clean)
+    setOtpError('')
+    // Auto-submit when 6 or 8 digits entered
+    if (clean.length >= 6) {
+      verifyOtp(clean)
+    }
   }
 
   const verifyOtp = async (token: string) => {
-    setLoading(true); setError('')
+    setLoading(true); setOtpError('')
     const { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' })
     if (error) {
-      setError('Invalid code. Try again.')
-      setOtp(['', '', '', '', '', ''])
+      setOtpError('Invalid code. Check your email and try again.')
+      setOtp('')
       setLoading(false)
-      document.getElementById('sotp-0')?.focus()
     } else {
       setStep('username')
       setLoading(false)
     }
+  }
+
+  const handleResend = async () => {
+    if (resendCooldown > 0) return
+    setLoading(true); setOtpError('')
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: true },
+    })
+    if (!error) setResendCooldown(60)
+    setLoading(false)
   }
 
   const handleUsernameNext = async () => {
@@ -135,15 +151,20 @@ function SignupInner() {
       username: username.toLowerCase(),
       date_of_birth: dobDate,
       gender,
-      looking_for: vibe, // BUG FIX: vibe was collected but never saved to DB
+      role: 'client',
+      current_mode: 'client',
+      dark_mode: true,
+      country: 'Nigeria',
     })
 
     if (error) { setError(error.message); setLoading(false); return }
     await supabase.from('client_profiles').upsert({ user_id: user.id })
+    localStorage.setItem('jinxy-onboarded', 'true')
     router.replace('/home')
   }
 
-  const inputStyle = {
+  // ─── Styles ───────────────────────────────────────────────
+  const inputStyle: React.CSSProperties = {
     width: '100%', padding: '14px 16px',
     background: 'var(--bg-input)',
     border: '1.5px solid var(--border)',
@@ -154,32 +175,39 @@ function SignupInner() {
     outline: 'none',
   }
 
-  const primaryBtn = {
+  const primaryBtn: React.CSSProperties = {
     width: '100%', padding: '16px',
     background: 'var(--pink)',
-    color: 'white',
-    border: 'none',
-    borderRadius: 9999,
-    cursor: 'pointer',
+    color: 'white', border: 'none',
+    borderRadius: 9999, cursor: 'pointer',
     fontFamily: 'var(--font-body)',
-    fontSize: 15,
-    fontWeight: 600,
+    fontSize: 15, fontWeight: 600,
     boxShadow: '0 4px 20px rgba(255,45,107,0.35)',
+    opacity: loading ? 0.7 : 1,
+    transition: 'opacity 200ms ease',
   }
 
-  const secondaryBtn = (active = false) => ({
+  const secondaryBtn = (active = false): React.CSSProperties => ({
     width: '100%', padding: '18px 20px',
     background: active ? 'rgba(255,45,107,0.06)' : 'var(--bg-elevated)',
     border: `1.5px solid ${active ? 'var(--pink)' : 'var(--border)'}`,
-    borderRadius: 16,
-    cursor: 'pointer',
+    borderRadius: 16, cursor: 'pointer',
     fontFamily: 'var(--font-body)',
-    fontSize: 15,
-    color: 'var(--text-primary)',
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    fontSize: 15, color: 'var(--text-primary)',
+    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
   })
+
+  const checkmark = (
+    <div style={{
+      width: 20, height: 20, borderRadius: '50%',
+      background: 'var(--pink)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+    }}>
+      <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
+        <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    </div>
+  )
 
   return (
     <div className="flex flex-col min-h-dvh" style={{ background: 'var(--bg-base)' }}>
@@ -191,7 +219,7 @@ function SignupInner() {
 
       {/* Progress bar */}
       {step !== 'method' && (
-        <div style={{ height: 2, width: '100%', background: 'var(--bg-elevated)', position: 'relative' }}>
+        <div style={{ height: 2, width: '100%', background: 'var(--bg-elevated)', position: 'relative', flexShrink: 0 }}>
           <div style={{
             position: 'absolute', left: 0, top: 0, height: '100%',
             width: `${progress}%`, background: 'var(--pink)',
@@ -212,19 +240,21 @@ function SignupInner() {
         )}
 
         <div className="mb-8">
-          {step === 'method' && (
-            <>
-              <div style={{ width: 40, height: 2, background: 'var(--pink)', marginBottom: 16 }} />
-              <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, color: 'var(--text-primary)', marginBottom: 8 }}>
-                Craving company?<br />
-                <span style={{ color: 'var(--pink)', fontStyle: 'italic' }}>You're not alone.</span>
-              </h1>
-            </>
-          )}
+          {step === 'method' && <>
+            <div style={{ width: 40, height: 2, background: 'var(--pink)', marginBottom: 16 }} />
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, color: 'var(--text-primary)', marginBottom: 8 }}>
+              Craving company?<br />
+              <span style={{ color: 'var(--pink)', fontStyle: 'italic' }}>You're not alone.</span>
+            </h1>
+          </>}
           {step === 'email' && <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, color: 'var(--text-primary)' }}>What's your email?</h1>}
           {step === 'otp' && <>
-            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, color: 'var(--text-primary)', marginBottom: 4 }}>Verification code</h1>
-            <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-secondary)' }}>Sent to {email}</p>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, color: 'var(--text-primary)', marginBottom: 4 }}>
+              Verification code
+            </h1>
+            <p style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--text-secondary)' }}>
+              Sent to {email}
+            </p>
           </>}
           {step === 'username' && <>
             <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 30, color: 'var(--text-primary)', marginBottom: 4 }}>Choose a username</h1>
@@ -250,10 +280,8 @@ function SignupInner() {
 
         {/* Method */}
         {step === 'method' && <>
-          <button onClick={handleGoogle} disabled={loading}
-            style={{ ...secondaryBtn(), gap: 12 }}>
-            <GoogleIcon />
-            <span>Continue with Google</span>
+          <button onClick={handleGoogle} disabled={loading} style={{ ...secondaryBtn(), gap: 12 }}>
+            <GoogleIcon /><span>Continue with Google</span>
           </button>
           <div className="flex items-center gap-3 py-2">
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
@@ -261,8 +289,7 @@ function SignupInner() {
             <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
           </div>
           <button onClick={() => setStep('email')} style={{ ...secondaryBtn(), gap: 12 }}>
-            <MailIcon />
-            <span>Continue with email</span>
+            <MailIcon /><span>Continue with email</span>
           </button>
           <p className="pt-4 text-center text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
             Already have an account?{' '}
@@ -278,35 +305,56 @@ function SignupInner() {
               onKeyDown={e => e.key === 'Enter' && handleEmailSubmit()} autoFocus />
             {error && <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12, marginTop: 8 }}>{error}</p>}
           </div>
-          <button onClick={handleEmailSubmit} disabled={loading || !email} style={primaryBtn}>
+          <button onClick={handleEmailSubmit} disabled={loading || !email} style={{ ...primaryBtn, opacity: (!email || loading) ? 0.5 : 1 }}>
             {loading ? <Spinner /> : 'Continue'}
           </button>
         </>}
 
-        {/* OTP */}
+        {/* OTP — single input, up to 8 digits */}
         {step === 'otp' && <>
-          <div className="flex gap-2 justify-between">
-            {otp.map((digit, i) => (
-              <input key={i} id={`sotp-${i}`} type="tel" inputMode="numeric" maxLength={1}
-                value={digit}
-                onChange={e => handleOtpChange(i, e.target.value)}
-                onKeyDown={e => handleOtpKeyDown(i, e)}
-                className="text-center text-xl font-semibold"
-                style={{
-                  width: 48, height: 56,
-                  background: 'var(--bg-input)',
-                  border: `1.5px solid ${digit ? 'var(--pink)' : 'var(--border)'}`,
-                  borderRadius: 14,
-                  color: 'var(--text-primary)',
-                  outline: 'none',
-                  transition: 'all 150ms ease',
-                  boxShadow: digit ? '0 0 0 3px rgba(255,45,107,0.15)' : 'none',
-                }}
-                autoFocus={i === 0} />
-            ))}
+          <div>
+            <input
+              type="tel"
+              inputMode="numeric"
+              style={{
+                ...inputStyle,
+                fontSize: 28,
+                fontWeight: 600,
+                letterSpacing: '0.25em',
+                textAlign: 'center',
+                border: `1.5px solid ${otp.length > 0 ? 'var(--pink)' : 'var(--border)'}`,
+                boxShadow: otp.length > 0 ? '0 0 0 3px rgba(255,45,107,0.15)' : 'none',
+                transition: 'all 150ms ease',
+              }}
+              placeholder="––––––––"
+              value={otp}
+              onChange={e => handleOtpChange(e.target.value)}
+              autoFocus
+              autoComplete="one-time-code"
+            />
+            {otpError && (
+              <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                {otpError}
+              </p>
+            )}
           </div>
-          {error && <p className="text-center" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12 }}>{error}</p>}
-          {loading && <div className="flex justify-center py-4"><Spinner /></div>}
+
+          {loading && <div className="flex justify-center py-2"><Spinner /></div>}
+
+          {/* Resend */}
+          <button
+            onClick={handleResend}
+            disabled={resendCooldown > 0 || loading}
+            style={{
+              width: '100%', padding: '12px',
+              background: 'none', border: 'none', cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer',
+              fontFamily: 'var(--font-body)', fontSize: 14,
+              color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--pink)',
+              transition: 'color 200ms ease',
+            }}
+          >
+            {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Didn't receive a code? Resend"}
+          </button>
         </>}
 
         {/* Username */}
@@ -319,7 +367,8 @@ function SignupInner() {
               autoFocus autoCapitalize="none" autoCorrect="off" />
             {error && <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12, marginTop: 8 }}>{error}</p>}
           </div>
-          <button onClick={handleUsernameNext} disabled={loading || username.length < 3} style={primaryBtn}>
+          <button onClick={handleUsernameNext} disabled={loading || username.length < 3}
+            style={{ ...primaryBtn, opacity: (loading || username.length < 3) ? 0.5 : 1 }}>
             {loading ? <Spinner /> : 'Continue'}
           </button>
         </>}
@@ -336,7 +385,8 @@ function SignupInner() {
             ))}
           </div>
           {error && <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12 }}>{error}</p>}
-          <button onClick={handleDobNext} disabled={!dob.day || !dob.month || !dob.year} style={primaryBtn}>
+          <button onClick={handleDobNext} disabled={!dob.day || !dob.month || !dob.year}
+            style={{ ...primaryBtn, opacity: (!dob.day || !dob.month || !dob.year) ? 0.5 : 1 }}>
             Continue
           </button>
         </>}
@@ -347,16 +397,12 @@ function SignupInner() {
             <button key={g} onClick={() => { setGender(g as 'male' | 'female'); setStep('vibe') }}
               style={secondaryBtn(gender === g)}>
               <span className="capitalize">{g}</span>
-              {gender === g && (
-                <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--pink)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              )}
+              {gender === g && checkmark}
             </button>
           ))}
-          <p className="text-center text-xs pt-2" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>You're free to change this later</p>
+          <p className="text-center text-xs pt-2" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+            You're free to change this later
+          </p>
         </>}
 
         {/* Vibe */}
@@ -364,18 +410,15 @@ function SignupInner() {
           {VIBES.map(v => (
             <button key={v.value} onClick={() => setVibe(v.value)} style={secondaryBtn(vibe === v.value)}>
               <span>{v.label}</span>
-              {vibe === v.value && (
-                <div style={{ width: 20, height: 20, borderRadius: '50%', background: 'var(--pink)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                  <svg width="10" height="8" viewBox="0 0 10 8" fill="none">
-                    <path d="M1 4L3.5 6.5L9 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                  </svg>
-                </div>
-              )}
+              {vibe === v.value && checkmark}
             </button>
           ))}
-          <p className="text-center text-xs pt-1" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>You're free to change your mind later</p>
+          <p className="text-center text-xs pt-1" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+            You're free to change your mind later
+          </p>
           {error && <p className="text-center" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12 }}>{error}</p>}
-          <button onClick={handleComplete} disabled={loading || !vibe} style={primaryBtn}>
+          <button onClick={handleComplete} disabled={loading || !vibe}
+            style={{ ...primaryBtn, opacity: (loading || !vibe) ? 0.5 : 1 }}>
             {loading ? <Spinner /> : 'Continue'}
           </button>
         </>}
@@ -384,7 +427,6 @@ function SignupInner() {
   )
 }
 
-// useSearchParams requires a Suspense boundary in Next.js App Router
 export default function SignupPage() {
   return (
     <Suspense>
