@@ -1,4 +1,3 @@
-// app/auth/callback/route.ts
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
@@ -18,10 +17,8 @@ export async function GET(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
+        getAll() { return cookieStore.getAll() },
+        setAll(cookiesToSet) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options as Parameters<typeof cookieStore.set>[2])
@@ -43,12 +40,6 @@ export async function GET(request: NextRequest) {
     return NextResponse.redirect(`${origin}/auth/login?error=no_user`)
   }
 
-  // Check if user has a complete public profile.
-  // A profile is only complete when username, date_of_birth, AND gender are all
-  // present. We deliberately do NOT use a hardcoded fallback date — any missing
-  // field means incomplete. This also handles the case where an admin deleted the
-  // user from auth.users but the old row remains in the users table: the auth UID
-  // changed on re-signup so maybeSingle() returns null → treated as new user.
   const { data: profile } = await supabase
     .from('users')
     .select('id, username, date_of_birth, gender')
@@ -61,22 +52,27 @@ export async function GET(request: NextRequest) {
     !!profile.date_of_birth &&
     !!profile.gender
 
-  const response = isProfileComplete
-    ? NextResponse.redirect(`${origin}${next}`)
-    : NextResponse.redirect(`${origin}/auth/complete-profile`)
+  // Instead of redirecting directly to /home or /complete-profile,
+  // redirect to /auth/confirm — a tiny client page that sets the cookie
+  // itself and then pushes forward. This avoids the race where middleware
+  // reads the request before the browser has stored the Set-Cookie header
+  // from this response.
+  const confirmUrl = isProfileComplete
+    ? `${origin}/auth/confirm?next=${encodeURIComponent(next)}`
+    : `${origin}/auth/confirm?next=%2Fauth%2Fcomplete-profile`
 
-  // Set a lightweight cookie that middleware can read without a network call.
-  // This lets middleware block half-onboarded users from accessing protected routes.
-  // The cookie is intentionally not HttpOnly so the client can also read it if needed.
+  const response = NextResponse.redirect(confirmUrl)
+
+  // Still set it on the response — belts and braces. The confirm page
+  // will also set it client-side to guarantee it lands.
   if (isProfileComplete) {
     response.cookies.set('jinxy-profile-complete', '1', {
       path: '/',
-      maxAge: 60 * 60 * 24 * 365, // 1 year
+      maxAge: 60 * 60 * 24 * 365,
       sameSite: 'lax',
       secure: process.env.NODE_ENV === 'production',
     })
   } else {
-    // Clear it in case a stale one exists (e.g. deleted and re-signed up)
     response.cookies.delete('jinxy-profile-complete')
   }
 
