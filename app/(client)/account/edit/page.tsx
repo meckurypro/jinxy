@@ -7,21 +7,55 @@ import { useUser } from '@/lib/hooks/useUser'
 import { useSupabase } from '@/lib/hooks/useSupabase'
 import { Avatar } from '@/components/shared/Avatar'
 
+// Skeleton shimmer block
+function Shimmer({ width, height, rounded = 8 }: {
+  width: string | number
+  height: number
+  rounded?: number
+}) {
+  return (
+    <div style={{
+      width,
+      height,
+      borderRadius: rounded,
+      background: 'rgba(255,255,255,0.06)',
+      animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+      flexShrink: 0,
+    }} />
+  )
+}
+
+// Skeleton input field — same dimensions as real input
+function InputSkeleton() {
+  return (
+    <div style={{
+      width: '100%',
+      height: 52,
+      borderRadius: 14,
+      background: 'rgba(255,255,255,0.06)',
+      animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+    }} />
+  )
+}
+
 export default function EditProfilePage() {
   const router = useRouter()
-  const { profile, refresh } = useUser()
+  const { profile, loading: profileLoading, refresh } = useUser()
   const supabase = useSupabase()
 
   const [fullName, setFullName] = useState('')
   const [username, setUsername] = useState('')
+  const [populated, setPopulated] = useState(false) // tracks whether fields have been filled
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
 
+  // Populate fields exactly once when profile first loads
   useEffect(() => {
-    if (profile) {
+    if (profile && !populated) {
       setFullName(profile.full_name ?? '')
       setUsername(profile.username ?? '')
+      setPopulated(true)
     }
   }, [profile?.id])
 
@@ -67,6 +101,8 @@ export default function EditProfilePage() {
     setSaving(false)
     setTimeout(() => { setSaved(false); router.back() }, 1200)
   }
+
+  const isLoading = profileLoading || !profile || !populated
 
   const inputStyle: React.CSSProperties = {
     width: '100%',
@@ -114,76 +150,108 @@ export default function EditProfilePage() {
 
       <div className="px-5 pb-8 space-y-6">
 
-        {/* Avatar — read only */}
+        {/* Avatar — read only, skeleton while loading */}
         <div className="flex flex-col items-center gap-2">
-          <Avatar
-            src={profile?.avatar_url}
-            name={profile?.full_name || profile?.username || 'U'}
-            size={88}
-          />
-          {/* Change DP link — goes back to account page where AvatarViewer lives */}
-          <button
-            onClick={() => router.back()}
-            style={{
-              background: 'none',
-              border: 'none',
-              cursor: 'pointer',
-              color: 'var(--pink)',
-              fontFamily: 'var(--font-body)',
-              fontSize: 13,
-              fontWeight: 500,
-            }}
-          >
-            Change display photo
-          </button>
+          {isLoading ? (
+            <>
+              <div style={{
+                width: 88, height: 88, borderRadius: '50%',
+                background: 'rgba(255,255,255,0.06)',
+                animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+              }} />
+              <Shimmer width={120} height={14} rounded={6} />
+            </>
+          ) : (
+            <>
+              <Avatar
+                src={profile?.avatar_url}
+                name={profile?.full_name || profile?.username || 'U'}
+                size={88}
+              />
+              {/* Change DP — goes back to account page where AvatarViewer lives */}
+              <button
+                onClick={() => router.back()}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--pink)',
+                  fontFamily: 'var(--font-body)',
+                  fontSize: 13,
+                  fontWeight: 500,
+                }}
+              >
+                Change display photo
+              </button>
+            </>
+          )}
         </div>
 
         {/* Fields */}
         <div className="space-y-4">
+
+          {/* Full name */}
           <div>
             <label style={labelStyle}>Full name</label>
-            <input
-              type="text"
-              style={inputStyle}
-              placeholder="Your name"
-              value={fullName}
-              onChange={e => { setFullName(e.target.value); setError('') }}
-            />
-          </div>
-
-          <div>
-            <label style={labelStyle}>Username</label>
-            <div style={{ position: 'relative' }}>
-              <span style={{
-                position: 'absolute', left: 16, top: '50%',
-                transform: 'translateY(-50%)',
-                color: 'var(--text-muted)',
-                fontFamily: 'var(--font-body)',
-                fontSize: 15,
-              }}>@</span>
+            {isLoading ? (
+              <InputSkeleton />
+            ) : (
               <input
                 type="text"
-                style={{ ...inputStyle, paddingLeft: 28 }}
-                placeholder="yourhandle"
-                value={username}
-                onChange={e => { setUsername(e.target.value.toLowerCase()); setError('') }}
-                autoCapitalize="none"
-                autoCorrect="off"
+                style={inputStyle}
+                placeholder="Your name"
+                value={fullName}
+                onChange={e => { setFullName(e.target.value); setError('') }}
               />
-            </div>
+            )}
           </div>
 
+          {/* Username */}
+          <div>
+            <label style={labelStyle}>Username</label>
+            {isLoading ? (
+              <InputSkeleton />
+            ) : (
+              <div style={{ position: 'relative' }}>
+                <span style={{
+                  position: 'absolute', left: 16, top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  fontFamily: 'var(--font-body)',
+                  fontSize: 15,
+                }}>@</span>
+                <input
+                  type="text"
+                  style={{ ...inputStyle, paddingLeft: 28 }}
+                  placeholder="yourhandle"
+                  value={username}
+                  onChange={e => { setUsername(e.target.value.toLowerCase()); setError('') }}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Email — always disabled */}
           <div>
             <label style={labelStyle}>Email</label>
-            <input
-              type="email"
-              style={{ ...inputStyle, opacity: 0.5, cursor: 'not-allowed' }}
-              value={profile?.email ?? ''}
-              disabled
-            />
-            <p className="mt-1.5 text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-              Contact support to change your email
-            </p>
+            {isLoading ? (
+              <InputSkeleton />
+            ) : (
+              <>
+                <input
+                  type="email"
+                  style={{ ...inputStyle, opacity: 0.5, cursor: 'not-allowed' }}
+                  value={profile?.email ?? ''}
+                  disabled
+                />
+                <p className="mt-1.5 text-xs"
+                  style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  Contact support to change your email
+                </p>
+              </>
+            )}
           </div>
         </div>
 
@@ -193,10 +261,10 @@ export default function EditProfilePage() {
           </p>
         )}
 
-        {/* Save */}
+        {/* Save button — disabled while loading */}
         <button
           onClick={handleSave}
-          disabled={saving || saved}
+          disabled={isLoading || saving || saved}
           className="w-full py-4 rounded-full text-base font-semibold text-white"
           style={{
             background: saved ? '#00D97E' : 'var(--pink)',
@@ -204,15 +272,22 @@ export default function EditProfilePage() {
               ? '0 4px 20px rgba(0,217,126,0.35)'
               : '0 4px 20px rgba(255,45,107,0.35)',
             border: 'none',
-            cursor: (saving || saved) ? 'not-allowed' : 'pointer',
+            cursor: (isLoading || saving || saved) ? 'not-allowed' : 'pointer',
             fontFamily: 'var(--font-body)',
-            opacity: saving ? 0.7 : 1,
+            opacity: (isLoading || saving) ? 0.5 : 1,
             transition: 'all 300ms ease',
           }}
         >
           {saved ? '✓ Saved!' : saving ? 'Saving...' : 'Save changes'}
         </button>
       </div>
+
+      <style jsx>{`
+        @keyframes skeleton-pulse {
+          0%, 100% { opacity: 0.4; }
+          50%       { opacity: 0.8; }
+        }
+      `}</style>
     </div>
   )
 }
