@@ -26,13 +26,27 @@ interface Stats {
 
 const MAX_MOMENTS = 5
 
+// Skeleton shimmer block
+function Shimmer({ width, height, rounded = 8 }: { width: string | number; height: number; rounded?: number }) {
+  return (
+    <div style={{
+      width,
+      height,
+      borderRadius: rounded,
+      background: 'rgba(255,255,255,0.06)',
+      animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+      flexShrink: 0,
+    }} />
+  )
+}
+
 export default function AccountPage() {
   const router = useRouter()
-  const { profile } = useUser()
+  const { profile, loading: profileLoading } = useUser()
   const supabase = useSupabase()
 
   const [tab, setTab] = useState<Tab>('profile')
-  const [stats, setStats] = useState<Stats>({ favourites: 0, likes: 0, jinxes: 0 })
+  const [stats, setStats] = useState<Stats | null>(null) // null = loading
   const [moments, setMoments] = useState<Moment[]>([])
   const [loadingMoments, setLoadingMoments] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -50,11 +64,23 @@ export default function AccountPage() {
 
   const fetchStats = async () => {
     if (!profile?.id) return
+
     const [favsResult, likesResult, jinxesResult] = await Promise.all([
-      supabase.from('profile_likes').select('*', { count: 'exact', head: true }).eq('client_id', profile.id),
-      supabase.from('media_likes').select('media_id, media!inner(user_id)', { count: 'exact', head: true }).eq('media.user_id', profile.id),
-      supabase.from('bookings').select('*', { count: 'exact', head: true }).eq('client_id', profile.id).eq('status', 'completed'),
+      supabase
+        .from('profile_likes')
+        .select('*', { count: 'exact', head: true })
+        .eq('client_id', profile.id),
+      supabase
+        .from('media_likes')
+        .select('media_id, media!inner(user_id)', { count: 'exact', head: true })
+        .eq('media.user_id', profile.id),
+      supabase
+        .from('bookings')
+        .select('*', { count: 'exact', head: true })
+        .eq('client_id', profile.id)
+        .eq('status', 'completed'),
     ])
+
     setStats({
       favourites: favsResult.count ?? 0,
       likes: likesResult.count ?? 0,
@@ -159,6 +185,8 @@ export default function AccountPage() {
     },
   ]
 
+  const isProfileLoading = profileLoading || !profile
+
   return (
     <div className="min-h-dvh" style={{ background: 'var(--bg-base)' }}>
 
@@ -168,69 +196,126 @@ export default function AccountPage() {
 
       {/* Profile header */}
       <div className="relative px-5 pt-14 pb-4">
+
+        {/* Avatar + name row */}
         <div className="flex items-center gap-4 mb-5">
-          <Avatar
-            src={profile?.avatar_url}
-            name={profile?.full_name || profile?.username || 'U'}
-            size={72}
-            onClick={() => router.push('/account/edit')}
-          />
+          {isProfileLoading ? (
+            // Avatar skeleton
+            <div style={{
+              width: 72, height: 72, borderRadius: '50%',
+              background: 'rgba(255,255,255,0.06)',
+              animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+              flexShrink: 0,
+            }} />
+          ) : (
+            <Avatar
+              src={profile?.avatar_url}
+              name={profile?.full_name || profile?.username || 'U'}
+              size={72}
+              onClick={() => router.push('/account/edit')}
+            />
+          )}
+
           <div className="flex-1 min-w-0">
-            <h1 className="font-display text-xl truncate" style={{ color: 'var(--text-primary)' }}>
-              {profile?.full_name || profile?.username || '...'}
-            </h1>
-            <p className="text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-              @{profile?.username}
-            </p>
+            {isProfileLoading ? (
+              <div className="space-y-2">
+                <Shimmer width="60%" height={20} rounded={6} />
+                <Shimmer width="40%" height={14} rounded={4} />
+              </div>
+            ) : (
+              <>
+                <h1 className="font-display text-xl truncate" style={{ color: 'var(--text-primary)' }}>
+                  {profile?.full_name || profile?.username || '—'}
+                </h1>
+                <p className="text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  @{profile?.username}
+                </p>
+              </>
+            )}
           </div>
-          <button
-            onClick={() => router.push('/account/edit')}
-            className="px-3 py-1.5 rounded-full text-xs font-medium"
-            style={{
-              background: 'var(--bg-elevated)',
-              border: '1px solid var(--border)',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-body)',
-            }}
-          >
-            Edit
-          </button>
+
+          {!isProfileLoading && (
+            <button
+              onClick={() => router.push('/account/edit')}
+              className="px-3 py-1.5 rounded-full text-xs font-medium"
+              style={{
+                background: 'var(--bg-elevated)',
+                border: '1px solid var(--border)',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-body)',
+              }}
+            >
+              Edit
+            </button>
+          )}
         </div>
 
-        {/* Stats */}
+        {/* Stats row */}
         <div
           className="grid grid-cols-3 gap-0 rounded-2xl overflow-hidden mb-4"
           style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
         >
-          <button
-            onClick={() => router.push('/account/favourites')}
-            className="flex flex-col items-center py-4"
-            style={{ borderRight: '1px solid var(--border)', background: 'transparent' }}
-          >
-            <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>{stats.favourites}</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>Favourites</p>
-          </button>
-          <div className="flex flex-col items-center py-4" style={{ borderRight: '1px solid var(--border)' }}>
-            <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>{stats.likes}</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>Likes</p>
-          </div>
-          <button
-            onClick={() => router.push('/jinxes')}
-            className="flex flex-col items-center py-4"
-            style={{ background: 'transparent' }}
-          >
-            <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>{stats.jinxes}</p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>Jinxes</p>
-          </button>
+          {stats === null ? (
+            // Stats skeleton — 3 shimmer blocks
+            [0, 1, 2].map((i) => (
+              <div
+                key={i}
+                className="flex flex-col items-center py-4 gap-2"
+                style={{ borderRight: i < 2 ? '1px solid var(--border)' : 'none' }}
+              >
+                <Shimmer width={32} height={20} rounded={4} />
+                <Shimmer width={48} height={12} rounded={3} />
+              </div>
+            ))
+          ) : (
+            <>
+              <button
+                onClick={() => router.push('/account/favourites')}
+                className="flex flex-col items-center py-4"
+                style={{ borderRight: '1px solid var(--border)', background: 'transparent' }}
+              >
+                <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>
+                  {stats.favourites}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  Favourites
+                </p>
+              </button>
+              <div className="flex flex-col items-center py-4" style={{ borderRight: '1px solid var(--border)' }}>
+                <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>
+                  {stats.likes}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  Likes
+                </p>
+              </div>
+              <button
+                onClick={() => router.push('/jinxes')}
+                className="flex flex-col items-center py-4"
+                style={{ background: 'transparent' }}
+              >
+                <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>
+                  {stats.jinxes}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  Jinxes
+                </p>
+              </button>
+            </>
+          )}
         </div>
 
-        {/* Credits */}
-        {(profile?.jinxy_credits ?? 0) > 0 && (
+        {/* Credits — only shown once loaded and balance > 0 */}
+        {!isProfileLoading && (profile?.jinxy_credits ?? 0) > 0 && (
           <button
             onClick={() => router.push('/account/referrals')}
             className="w-full flex items-center justify-between p-3 rounded-xl mb-4"
-            style={{ background: 'rgba(255,45,107,0.06)', border: '1px solid rgba(255,45,107,0.15)', cursor: 'pointer' }}
+            style={{
+              background: 'rgba(255,45,107,0.06)',
+              border: '1px solid rgba(255,45,107,0.15)',
+              cursor: 'pointer',
+            }}
           >
             <div className="flex items-center gap-2">
               <span>💰</span>
@@ -298,7 +383,8 @@ export default function AccountPage() {
                       {item.label}
                     </span>
                     <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path d="M6 4l4 4-4 4" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                      <path d="M6 4l4 4-4 4" stroke="var(--text-muted)" strokeWidth="1.5"
+                        strokeLinecap="round" strokeLinejoin="round" />
                     </svg>
                   </button>
                 ))}
@@ -307,10 +393,13 @@ export default function AccountPage() {
           ))}
         </div>
       ) : (
+        // Moments tab
         <div className="relative px-5 pb-8">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>Display Media</p>
+              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+                Display Media
+              </p>
               <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                 {moments.length}/{MAX_MOMENTS} · Vendors see these before accepting
               </p>
@@ -350,7 +439,11 @@ export default function AccountPage() {
           {loadingMoments ? (
             <div className="grid grid-cols-3 gap-2">
               {[1, 2, 3].map(i => (
-                <div key={i} className="rounded-xl" style={{ aspectRatio: '3/4', background: 'var(--bg-elevated)' }} />
+                <div key={i} className="rounded-xl" style={{
+                  aspectRatio: '3/4',
+                  background: 'rgba(255,255,255,0.06)',
+                  animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+                }} />
               ))}
             </div>
           ) : moments.length === 0 ? (
@@ -365,14 +458,19 @@ export default function AccountPage() {
                 </svg>
               </div>
               <div className="text-center">
-                <p className="text-sm font-medium mb-0.5" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>Add your first moment</p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>Photos or videos · Max {MAX_MOMENTS}</p>
+                <p className="text-sm font-medium mb-0.5" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
+                  Add your first moment
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  Photos or videos · Max {MAX_MOMENTS}
+                </p>
               </div>
             </button>
           ) : (
             <div className="grid grid-cols-3 gap-2">
               {moments.map(moment => (
-                <div key={moment.id} className="relative rounded-xl overflow-hidden" style={{ aspectRatio: '3/4', background: 'var(--bg-elevated)' }}>
+                <div key={moment.id} className="relative rounded-xl overflow-hidden"
+                  style={{ aspectRatio: '3/4', background: 'var(--bg-elevated)' }}>
                   {moment.media_type === 'video' ? (
                     <video src={moment.storage_path} className="w-full h-full object-cover" muted playsInline />
                   ) : (
@@ -380,7 +478,9 @@ export default function AccountPage() {
                   )}
                   {moment.media_type === 'video' && (
                     <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(0,0,0,0.6)' }}>
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2l6 3-6 3V2z" fill="white" /></svg>
+                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+                        <path d="M2 2l6 3-6 3V2z" fill="white" />
+                      </svg>
                     </div>
                   )}
                   <button
@@ -409,11 +509,12 @@ export default function AccountPage() {
             </div>
           )}
 
-          <input ref={fileRef} type="file" accept="image/*,video/*" capture="environment" className="hidden" onChange={handleUpload} />
+          <input ref={fileRef} type="file" accept="image/*,video/*" capture="environment"
+            className="hidden" onChange={handleUpload} />
         </div>
       )}
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation sheet */}
       {deleteConfirm && (
         <div
           className="fixed inset-0 z-50 flex items-end justify-center"
@@ -426,7 +527,9 @@ export default function AccountPage() {
             onClick={e => e.stopPropagation()}
           >
             <div className="w-10 h-1 rounded-full mx-auto mb-6" style={{ background: 'var(--border)' }} />
-            <p className="font-display text-lg mb-1" style={{ color: 'var(--text-primary)' }}>Remove this moment?</p>
+            <p className="font-display text-lg mb-1" style={{ color: 'var(--text-primary)' }}>
+              Remove this moment?
+            </p>
             <p className="text-sm mb-6" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               This will permanently delete the media. This action cannot be undone.
             </p>
@@ -435,14 +538,21 @@ export default function AccountPage() {
                 onClick={handleDeleteConfirm}
                 disabled={deleting}
                 className="w-full py-3.5 rounded-full text-sm font-semibold text-white"
-                style={{ background: 'var(--red, #FF4D6A)', border: 'none', cursor: deleting ? 'not-allowed' : 'pointer', fontFamily: 'var(--font-body)', opacity: deleting ? 0.7 : 1 }}
+                style={{
+                  background: 'var(--red, #FF4D6A)', border: 'none',
+                  cursor: deleting ? 'not-allowed' : 'pointer',
+                  fontFamily: 'var(--font-body)', opacity: deleting ? 0.7 : 1,
+                }}
               >
                 {deleting ? 'Removing...' : 'Yes, remove'}
               </button>
               <button
                 onClick={() => setDeleteConfirm(null)}
                 className="w-full py-3.5 rounded-full text-sm font-medium"
-                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+                style={{
+                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
+                  color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)',
+                }}
               >
                 Cancel
               </button>
@@ -450,6 +560,13 @@ export default function AccountPage() {
           </div>
         </div>
       )}
+
+      <style jsx>{`
+        @keyframes skeleton-pulse {
+          0%, 100% { opacity: 0.4; }
+          50%       { opacity: 0.8; }
+        }
+      `}</style>
     </div>
   )
 }
