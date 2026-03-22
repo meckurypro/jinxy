@@ -1,3 +1,4 @@
+// app/auth/callback/route.ts
 import { createServerClient } from '@supabase/ssr'
 import { cookies } from 'next/headers'
 import { NextResponse, type NextRequest } from 'next/server'
@@ -17,8 +18,10 @@ export async function GET(request: NextRequest) {
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        getAll() { return cookieStore.getAll() },
-        setAll(cookiesToSet) {
+        getAll() {
+          return cookieStore.getAll()
+        },
+        setAll(cookiesToSet: { name: string; value: string; options?: Record<string, unknown> }[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options as Parameters<typeof cookieStore.set>[2])
@@ -52,19 +55,15 @@ export async function GET(request: NextRequest) {
     !!profile.date_of_birth &&
     !!profile.gender
 
-  // Instead of redirecting directly to /home or /complete-profile,
-  // redirect to /auth/confirm — a tiny client page that sets the cookie
-  // itself and then pushes forward. This avoids the race where middleware
-  // reads the request before the browser has stored the Set-Cookie header
-  // from this response.
+  // Redirect to /auth/confirm — a thin client page that sets the cookie
+  // synchronously before navigating, avoiding the race where middleware
+  // reads the next request before the browser has stored Set-Cookie.
   const confirmUrl = isProfileComplete
     ? `${origin}/auth/confirm?next=${encodeURIComponent(next)}`
     : `${origin}/auth/confirm?next=%2Fauth%2Fcomplete-profile`
 
   const response = NextResponse.redirect(confirmUrl)
 
-  // Still set it on the response — belts and braces. The confirm page
-  // will also set it client-side to guarantee it lands.
   if (isProfileComplete) {
     response.cookies.set('jinxy-profile-complete', '1', {
       path: '/',
