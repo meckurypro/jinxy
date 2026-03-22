@@ -8,26 +8,23 @@ import { useSupabase } from '@/lib/hooks/useSupabase'
 import { Avatar } from '@/components/shared/Avatar'
 import { formatCurrency } from '@/lib/utils'
 
-type Tab = 'profile' | 'moments'
-
-interface Moment {
-  id: string
-  storage_path: string
-  media_type: 'image' | 'video'
-  display_order: number
-  created_at: string
-}
-
 interface Stats {
   favourites: number
   likes: number
   jinxes: number
 }
 
-const MAX_MOMENTS = 5
+interface AvatarMoment {
+  id: string
+  storage_path: string
+}
 
 // Skeleton shimmer block
-function Shimmer({ width, height, rounded = 8 }: { width: string | number; height: number; rounded?: number }) {
+function Shimmer({ width, height, rounded = 8 }: {
+  width: string | number
+  height: number
+  rounded?: number
+}) {
   return (
     <div style={{
       width,
@@ -42,29 +39,22 @@ function Shimmer({ width, height, rounded = 8 }: { width: string | number; heigh
 
 export default function AccountPage() {
   const router = useRouter()
-  const { profile, loading: profileLoading } = useUser()
+  const { profile, loading: profileLoading, refresh } = useUser()
   const supabase = useSupabase()
 
-  const [tab, setTab] = useState<Tab>('profile')
-  const [stats, setStats] = useState<Stats | null>(null) // null = loading
-  const [moments, setMoments] = useState<Moment[]>([])
-  const [loadingMoments, setLoadingMoments] = useState(false)
-  const [uploading, setUploading] = useState(false)
-  const [uploadProgress, setUploadProgress] = useState(0)
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-  const [deleting, setDeleting] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [stats, setStats] = useState<Stats | null>(null)
+  const [avatarMoment, setAvatarMoment] = useState<AvatarMoment | null | undefined>(undefined) // undefined = loading
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false)
 
   useEffect(() => {
     if (profile?.id) {
       fetchStats()
-      fetchMoments()
+      fetchAvatarMoment()
     }
   }, [profile?.id])
 
   const fetchStats = async () => {
     if (!profile?.id) return
-
     const [favsResult, likesResult, jinxesResult] = await Promise.all([
       supabase
         .from('profile_likes')
@@ -80,7 +70,6 @@ export default function AccountPage() {
         .eq('client_id', profile.id)
         .eq('status', 'completed'),
     ])
-
     setStats({
       favourites: favsResult.count ?? 0,
       likes: likesResult.count ?? 0,
@@ -88,56 +77,17 @@ export default function AccountPage() {
     })
   }
 
-  const fetchMoments = async () => {
+  const fetchAvatarMoment = async () => {
     if (!profile?.id) return
-    setLoadingMoments(true)
     const { data } = await supabase
       .from('media')
-      .select('id, storage_path, media_type, display_order, created_at')
+      .select('id, storage_path')
       .eq('user_id', profile.id)
       .eq('category', 'moment')
       .eq('is_active', true)
-      .order('display_order', { ascending: true })
-    if (data) setMoments(data as Moment[])
-    setLoadingMoments(false)
-  }
-
-  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file || !profile?.id || moments.length >= MAX_MOMENTS) return
-    setUploading(true); setUploadProgress(0)
-    const ext = file.name.split('.').pop()
-    const mediaType = file.type.startsWith('video') ? 'video' : 'image'
-    const path = `moments/${profile.id}/${Date.now()}.${ext}`
-    const progressInterval = setInterval(() => setUploadProgress(p => Math.min(p + 15, 85)), 200)
-    const { error: uploadError } = await supabase.storage.from('media').upload(path, file, { upsert: false })
-    clearInterval(progressInterval)
-    if (!uploadError) {
-      setUploadProgress(100)
-      const { data: urlData } = supabase.storage.from('media').getPublicUrl(path)
-      await supabase.from('media').insert({
-        user_id: profile.id, storage_path: urlData.publicUrl,
-        media_type: mediaType, category: 'moment', watermarked: true,
-        is_active: true, display_order: moments.length,
-      })
-      await fetchMoments()
-    }
-    setUploading(false); setUploadProgress(0)
-    if (fileRef.current) fileRef.current.value = ''
-  }
-
-  const handleDeleteConfirm = async () => {
-    if (!deleteConfirm || !profile?.id) return
-    setDeleting(true)
-    const moment = moments.find(m => m.id === deleteConfirm)
-    if (moment) {
-      const pathParts = moment.storage_path.split('/media/')
-      const storagePath = pathParts[1]
-      if (storagePath) await supabase.storage.from('media').remove([storagePath])
-      await supabase.from('media').update({ is_active: false }).eq('id', deleteConfirm)
-    }
-    setDeleteConfirm(null); setDeleting(false)
-    await fetchMoments()
+      .eq('is_avatar', true)
+      .maybeSingle()
+    setAvatarMoment(data ?? null)
   }
 
   const handleSignOut = async () => {
@@ -145,6 +95,8 @@ export default function AccountPage() {
     document.cookie = 'jinxy-profile-complete=; path=/; max-age=0'
     router.replace('/auth/login')
   }
+
+  const isProfileLoading = profileLoading || !profile
 
   const menuSections = [
     {
@@ -185,7 +137,8 @@ export default function AccountPage() {
     },
   ]
 
-  const isProfileLoading = profileLoading || !profile
+  // Avatar src: prefer avatarMoment, fall back to profile.avatar_url
+  const avatarSrc = avatarMoment?.storage_path ?? profile?.avatar_url ?? null
 
   return (
     <div className="min-h-dvh" style={{ background: 'var(--bg-base)' }}>
@@ -195,12 +148,11 @@ export default function AccountPage() {
       }} />
 
       {/* Profile header */}
-      <div className="relative px-5 pt-14 pb-4">
+      <div className="relative px-5 pt-14 pb-6">
 
         {/* Avatar + name row */}
         <div className="flex items-center gap-4 mb-5">
           {isProfileLoading ? (
-            // Avatar skeleton
             <div style={{
               width: 72, height: 72, borderRadius: '50%',
               background: 'rgba(255,255,255,0.06)',
@@ -208,12 +160,16 @@ export default function AccountPage() {
               flexShrink: 0,
             }} />
           ) : (
-            <Avatar
-              src={profile?.avatar_url}
-              name={profile?.full_name || profile?.username || 'U'}
-              size={72}
-              onClick={() => router.push('/account/edit')}
-            />
+            <button
+              onClick={() => setShowAvatarViewer(true)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, flexShrink: 0 }}
+            >
+              <Avatar
+                src={avatarSrc}
+                name={profile?.full_name || profile?.username || 'U'}
+                size={72}
+              />
+            </button>
           )}
 
           <div className="flex-1 min-w-0">
@@ -234,9 +190,10 @@ export default function AccountPage() {
             )}
           </div>
 
+          {/* Moments button — top right */}
           {!isProfileLoading && (
             <button
-              onClick={() => router.push('/account/edit')}
+              onClick={() => router.push('/account/moments')}
               className="px-3 py-1.5 rounded-full text-xs font-medium"
               style={{
                 background: 'var(--bg-elevated)',
@@ -246,7 +203,7 @@ export default function AccountPage() {
                 fontFamily: 'var(--font-body)',
               }}
             >
-              Edit
+              Moments
             </button>
           )}
         </div>
@@ -257,8 +214,7 @@ export default function AccountPage() {
           style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
         >
           {stats === null ? (
-            // Stats skeleton — 3 shimmer blocks
-            [0, 1, 2].map((i) => (
+            [0, 1, 2].map(i => (
               <div
                 key={i}
                 className="flex flex-col items-center py-4 gap-2"
@@ -282,7 +238,8 @@ export default function AccountPage() {
                   Favourites
                 </p>
               </button>
-              <div className="flex flex-col items-center py-4" style={{ borderRight: '1px solid var(--border)' }}>
+              <div className="flex flex-col items-center py-4"
+                style={{ borderRight: '1px solid var(--border)' }}>
                 <p className="text-lg font-semibold font-display" style={{ color: 'var(--text-primary)' }}>
                   {stats.likes}
                 </p>
@@ -306,11 +263,11 @@ export default function AccountPage() {
           )}
         </div>
 
-        {/* Credits — only shown once loaded and balance > 0 */}
+        {/* Credits */}
         {!isProfileLoading && (profile?.jinxy_credits ?? 0) > 0 && (
           <button
             onClick={() => router.push('/account/referrals')}
-            className="w-full flex items-center justify-between p-3 rounded-xl mb-4"
+            className="w-full flex items-center justify-between p-3 rounded-xl mb-2"
             style={{
               background: 'rgba(255,45,107,0.06)',
               border: '1px solid rgba(255,45,107,0.15)',
@@ -328,237 +285,417 @@ export default function AccountPage() {
             </p>
           </button>
         )}
-
-        {/* Tabs */}
-        <div className="flex rounded-full p-1" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-          {(['profile', 'moments'] as Tab[]).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className="flex-1 py-2 rounded-full text-sm font-medium capitalize transition-all duration-200"
-              style={{
-                background: tab === t ? 'var(--pink)' : 'transparent',
-                color: tab === t ? 'white' : 'var(--text-muted)',
-                border: 'none', cursor: 'pointer',
-                fontFamily: 'var(--font-body)',
-              }}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
       </div>
 
-      {/* Tab content */}
-      {tab === 'profile' ? (
-        <div className="relative px-5 pb-8 space-y-6">
-          {menuSections.map(section => (
-            <div key={section.title}>
-              <p className="text-xs font-medium uppercase tracking-widest mb-2 px-1"
-                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                {section.title}
-              </p>
-              <div className="rounded-2xl overflow-hidden"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-                {section.items.map((item, idx) => (
-                  <button
-                    key={item.label}
-                    onClick={item.action}
-                    className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all duration-150"
+      {/* Menu sections */}
+      <div className="relative px-5 pb-8 space-y-6">
+        {menuSections.map(section => (
+          <div key={section.title}>
+            <p className="text-xs font-medium uppercase tracking-widest mb-2 px-1"
+              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+              {section.title}
+            </p>
+            <div className="rounded-2xl overflow-hidden"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+              {section.items.map((item, idx) => (
+                <button
+                  key={item.label}
+                  onClick={item.action}
+                  className="w-full flex items-center gap-3 px-4 py-3.5 text-left transition-all duration-150"
+                  style={{
+                    borderBottom: idx < section.items.length - 1 ? '1px solid var(--border)' : 'none',
+                    background: 'transparent',
+                  }}
+                >
+                  <span className="text-base w-6 text-center">{item.icon}</span>
+                  <span
+                    className="flex-1 text-sm font-medium"
                     style={{
-                      borderBottom: idx < section.items.length - 1 ? '1px solid var(--border)' : 'none',
-                      background: 'transparent',
+                      color: (item as { danger?: boolean }).danger ? 'var(--red)'
+                        : (item as { highlight?: boolean }).highlight ? '#9333EA'
+                        : 'var(--text-primary)',
+                      fontFamily: 'var(--font-body)',
                     }}
                   >
-                    <span className="text-base w-6 text-center">{item.icon}</span>
-                    <span
-                      className="flex-1 text-sm font-medium"
-                      style={{
-                        color: (item as { danger?: boolean }).danger ? 'var(--red)'
-                          : (item as { highlight?: boolean }).highlight ? '#9333EA'
-                          : 'var(--text-primary)',
-                        fontFamily: 'var(--font-body)',
-                      }}
-                    >
-                      {item.label}
-                    </span>
-                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                      <path d="M6 4l4 4-4 4" stroke="var(--text-muted)" strokeWidth="1.5"
-                        strokeLinecap="round" strokeLinejoin="round" />
-                    </svg>
-                  </button>
-                ))}
-              </div>
+                    {item.label}
+                  </span>
+                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                    <path d="M6 4l4 4-4 4" stroke="var(--text-muted)" strokeWidth="1.5"
+                      strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              ))}
             </div>
-          ))}
-        </div>
-      ) : (
-        // Moments tab
-        <div className="relative px-5 pb-8">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <p className="text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-                Display Media
-              </p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                {moments.length}/{MAX_MOMENTS} · Vendors see these before accepting
-              </p>
-            </div>
-            {moments.length < MAX_MOMENTS && (
-              <button
-                onClick={() => fileRef.current?.click()}
-                disabled={uploading}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-full text-xs font-medium"
+          </div>
+        ))}
+      </div>
+
+      {/* Avatar Viewer */}
+      {showAvatarViewer && profile?.id && (
+        <AvatarViewer
+          userId={profile.id}
+          currentAvatarMoment={avatarMoment ?? null}
+          supabase={supabase}
+          onClose={() => setShowAvatarViewer(false)}
+          onChanged={() => {
+            fetchAvatarMoment()
+            refresh()
+          }}
+        />
+      )}
+
+      <style jsx>{`
+        @keyframes skeleton-pulse {
+          0%, 100% { opacity: 0.4; }
+          50%       { opacity: 0.8; }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+// ─── AvatarViewer ─────────────────────────────────────────────────────────────
+interface AvatarViewerProps {
+  userId: string
+  currentAvatarMoment: AvatarMoment | null
+  supabase: ReturnType<typeof import('@/lib/hooks/useSupabase').useSupabase>
+  onClose: () => void
+  onChanged: () => void
+}
+
+interface ImageMoment {
+  id: string
+  storage_path: string
+  is_avatar: boolean
+}
+
+function AvatarViewer({ userId, currentAvatarMoment, supabase, onClose, onChanged }: AvatarViewerProps) {
+  const router = useRouter()
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  const [mode, setMode] = useState<'view' | 'pick'>('view')
+  const [imageMoments, setImageMoments] = useState<ImageMoment[]>([])
+  const [loadingMoments, setLoadingMoments] = useState(false)
+  const [settingDp, setSettingDp] = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
+
+  const fetchImageMoments = async () => {
+    setLoadingMoments(true)
+    const { data } = await supabase
+      .from('media')
+      .select('id, storage_path, is_avatar')
+      .eq('user_id', userId)
+      .eq('category', 'moment')
+      .eq('media_type', 'image')
+      .eq('is_active', true)
+      .order('display_order', { ascending: true })
+    if (data) setImageMoments(data as ImageMoment[])
+    setLoadingMoments(false)
+  }
+
+  useEffect(() => {
+    if (mode === 'pick') fetchImageMoments()
+  }, [mode])
+
+  const handleSetAvatar = async (moment: ImageMoment) => {
+    setSettingDp(moment.id)
+    // Clear all is_avatar flags for this user
+    await supabase
+      .from('media')
+      .update({ is_avatar: false })
+      .eq('user_id', userId)
+      .eq('is_avatar', true)
+
+    // Set new avatar
+    await supabase
+      .from('media')
+      .update({ is_avatar: true })
+      .eq('id', moment.id)
+
+    // Update users.avatar_url
+    await supabase
+      .from('users')
+      .update({ avatar_url: moment.storage_path })
+      .eq('id', userId)
+
+    setSettingDp(null)
+    onChanged()
+    onClose()
+  }
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+
+    const ext = file.name.split('.').pop()
+    const path = `moments/${userId}/${Date.now()}.${ext}`
+
+    const { error: uploadError } = await supabase.storage
+      .from('media')
+      .upload(path, file, { upsert: false })
+
+    if (!uploadError) {
+      const { data: urlData } = supabase.storage.from('media').getPublicUrl(path)
+      const { data: inserted } = await supabase
+        .from('media')
+        .insert({
+          user_id: userId,
+          storage_path: urlData.publicUrl,
+          media_type: 'image',
+          category: 'moment',
+          watermarked: true,
+          is_active: true,
+          is_avatar: false,
+          display_order: 99,
+        })
+        .select('id, storage_path, is_avatar')
+        .single()
+
+      if (inserted) {
+        await handleSetAvatar(inserted as ImageMoment)
+      }
+    }
+
+    setUploading(false)
+    if (fileRef.current) fileRef.current.value = ''
+  }
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex flex-col"
+      style={{ background: '#000' }}
+    >
+      {/* View mode */}
+      {mode === 'view' && (
+        <>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 pt-14 pb-4">
+            <button
+              onClick={onClose}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'white' }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M12 4L6 10L12 16" stroke="currentColor" strokeWidth="1.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <p className="text-sm font-medium" style={{ color: 'white', fontFamily: 'var(--font-body)' }}>
+              Display Photo
+            </p>
+            <div style={{ width: 20 }} />
+          </div>
+
+          {/* Full image */}
+          <div className="flex-1 flex items-center justify-center px-6">
+            {currentAvatarMoment ? (
+              <img
+                src={currentAvatarMoment.storage_path}
+                alt="Display photo"
                 style={{
-                  background: 'var(--pink)', color: 'white', border: 'none',
-                  cursor: uploading ? 'not-allowed' : 'pointer',
-                  fontFamily: 'var(--font-body)', opacity: uploading ? 0.7 : 1,
-                  boxShadow: '0 4px 12px rgba(255,45,107,0.35)',
+                  width: '100%',
+                  maxHeight: '60vh',
+                  objectFit: 'cover',
+                  borderRadius: 16,
                 }}
-              >
-                <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-                  <path d="M6 1v10M1 6h10" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-                Add
-              </button>
+              />
+            ) : (
+              // Silhouette placeholder
+              <div className="flex flex-col items-center gap-4">
+                <div
+                  style={{
+                    width: 120, height: 120, borderRadius: '50%',
+                    background: 'rgba(255,255,255,0.08)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}
+                >
+                  <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+                    <circle cx="28" cy="20" r="10" fill="rgba(255,255,255,0.2)" />
+                    <path d="M8 48C8 36 48 36 48 48" stroke="rgba(255,255,255,0.2)" strokeWidth="3" strokeLinecap="round" />
+                  </svg>
+                </div>
+                <p style={{ color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-body)', fontSize: 14 }}>
+                  No display photo set
+                </p>
+              </div>
             )}
           </div>
 
-          {uploading && (
-            <div className="mb-4 p-3 rounded-xl" style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-xs" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>Uploading...</p>
-                <p className="text-xs" style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}>{uploadProgress}%</p>
-              </div>
-              <div className="w-full rounded-full overflow-hidden" style={{ height: 3, background: 'var(--bg-elevated)' }}>
-                <div style={{ height: '100%', width: `${uploadProgress}%`, background: 'var(--pink)', transition: 'width 200ms ease', borderRadius: 999 }} />
-              </div>
-            </div>
-          )}
-
-          {loadingMoments ? (
-            <div className="grid grid-cols-3 gap-2">
-              {[1, 2, 3].map(i => (
-                <div key={i} className="rounded-xl" style={{
-                  aspectRatio: '3/4',
-                  background: 'rgba(255,255,255,0.06)',
-                  animation: 'skeleton-pulse 1.5s ease-in-out infinite',
-                }} />
-              ))}
-            </div>
-          ) : moments.length === 0 ? (
+          {/* Actions */}
+          <div className="px-5 pb-12 space-y-3">
             <button
-              onClick={() => fileRef.current?.click()}
-              className="w-full flex flex-col items-center justify-center gap-3 rounded-2xl py-12"
-              style={{ background: 'var(--bg-surface)', border: '1.5px dashed var(--border)', cursor: 'pointer' }}
+              onClick={() => setMode('pick')}
+              className="w-full py-4 rounded-full text-base font-semibold text-white"
+              style={{
+                background: 'var(--pink)',
+                border: 'none',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-body)',
+                boxShadow: '0 4px 20px rgba(255,45,107,0.4)',
+              }}
             >
-              <div className="w-12 h-12 rounded-full flex items-center justify-center" style={{ background: 'var(--bg-elevated)' }}>
-                <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
-                  <path d="M11 4v14M4 11h14" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-              </div>
-              <div className="text-center">
-                <p className="text-sm font-medium mb-0.5" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
-                  Add your first moment
-                </p>
-                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                  Photos or videos · Max {MAX_MOMENTS}
-                </p>
-              </div>
+              Change display photo
             </button>
-          ) : (
-            <div className="grid grid-cols-3 gap-2">
-              {moments.map(moment => (
-                <div key={moment.id} className="relative rounded-xl overflow-hidden"
-                  style={{ aspectRatio: '3/4', background: 'var(--bg-elevated)' }}>
-                  {moment.media_type === 'video' ? (
-                    <video src={moment.storage_path} className="w-full h-full object-cover" muted playsInline />
-                  ) : (
-                    <img src={moment.storage_path} alt="Moment" className="w-full h-full object-cover" />
-                  )}
-                  {moment.media_type === 'video' && (
-                    <div className="absolute top-2 left-2 px-1.5 py-0.5 rounded" style={{ background: 'rgba(0,0,0,0.6)' }}>
-                      <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                        <path d="M2 2l6 3-6 3V2z" fill="white" />
-                      </svg>
-                    </div>
-                  )}
-                  <button
-                    onClick={() => setDeleteConfirm(moment.id)}
-                    className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center"
-                    style={{ background: 'rgba(0,0,0,0.6)', border: 'none', cursor: 'pointer' }}
-                  >
-                    <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                      <path d="M2 2l6 6M8 2L2 8" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                    </svg>
-                  </button>
-                </div>
-              ))}
-              {moments.length < MAX_MOMENTS && (
-                <button
-                  onClick={() => fileRef.current?.click()}
-                  className="rounded-xl flex flex-col items-center justify-center gap-1"
-                  style={{ aspectRatio: '3/4', background: 'var(--bg-surface)', border: '1.5px dashed var(--border)', cursor: 'pointer' }}
-                >
-                  <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
-                    <path d="M9 3v12M3 9h12" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                  <span className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>Add</span>
-                </button>
-              )}
-            </div>
-          )}
-
-          <input ref={fileRef} type="file" accept="image/*,video/*" capture="environment"
-            className="hidden" onChange={handleUpload} />
-        </div>
+            <button
+              onClick={onClose}
+              className="w-full py-4 rounded-full text-base font-medium"
+              style={{
+                background: 'transparent',
+                border: '1px solid rgba(255,255,255,0.15)',
+                color: 'rgba(255,255,255,0.6)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-body)',
+              }}
+            >
+              Close
+            </button>
+          </div>
+        </>
       )}
 
-      {/* Delete confirmation sheet */}
-      {deleteConfirm && (
-        <div
-          className="fixed inset-0 z-50 flex items-end justify-center"
-          style={{ background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(4px)' }}
-          onClick={() => setDeleteConfirm(null)}
-        >
-          <div
-            className="w-full max-w-app px-5 pb-8 pt-5 rounded-t-3xl"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-            onClick={e => e.stopPropagation()}
-          >
-            <div className="w-10 h-1 rounded-full mx-auto mb-6" style={{ background: 'var(--border)' }} />
-            <p className="font-display text-lg mb-1" style={{ color: 'var(--text-primary)' }}>
-              Remove this moment?
+      {/* Pick mode */}
+      {mode === 'pick' && (
+        <>
+          {/* Header */}
+          <div className="flex items-center justify-between px-5 pt-14 pb-4">
+            <button
+              onClick={() => setMode('view')}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'white' }}
+            >
+              <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                <path d="M12 4L6 10L12 16" stroke="currentColor" strokeWidth="1.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+            <p className="text-sm font-medium" style={{ color: 'white', fontFamily: 'var(--font-body)' }}>
+              Choose Photo
             </p>
-            <p className="text-sm mb-6" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-              This will permanently delete the media. This action cannot be undone.
-            </p>
-            <div className="space-y-3">
-              <button
-                onClick={handleDeleteConfirm}
-                disabled={deleting}
-                className="w-full py-3.5 rounded-full text-sm font-semibold text-white"
-                style={{
-                  background: 'var(--red, #FF4D6A)', border: 'none',
-                  cursor: deleting ? 'not-allowed' : 'pointer',
-                  fontFamily: 'var(--font-body)', opacity: deleting ? 0.7 : 1,
-                }}
-              >
-                {deleting ? 'Removing...' : 'Yes, remove'}
-              </button>
-              <button
-                onClick={() => setDeleteConfirm(null)}
-                className="w-full py-3.5 rounded-full text-sm font-medium"
-                style={{
-                  background: 'var(--bg-elevated)', border: '1px solid var(--border)',
-                  color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)',
-                }}
-              >
-                Cancel
-              </button>
-            </div>
+            <div style={{ width: 20 }} />
           </div>
-        </div>
+
+          {/* Grid */}
+          <div className="flex-1 overflow-y-auto px-5">
+            {loadingMoments ? (
+              <div className="grid grid-cols-3 gap-2">
+                {[1, 2, 3].map(i => (
+                  <div key={i} style={{
+                    aspectRatio: '1',
+                    borderRadius: 12,
+                    background: 'rgba(255,255,255,0.08)',
+                    animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+                  }} />
+                ))}
+              </div>
+            ) : imageMoments.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-16 text-center gap-4">
+                <p style={{ color: 'rgba(255,255,255,0.4)', fontFamily: 'var(--font-body)', fontSize: 14 }}>
+                  No photos yet
+                </p>
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className="px-6 py-3 rounded-full text-sm font-semibold text-white"
+                  style={{
+                    background: 'var(--pink)',
+                    border: 'none',
+                    cursor: uploading ? 'not-allowed' : 'pointer',
+                    fontFamily: 'var(--font-body)',
+                    opacity: uploading ? 0.7 : 1,
+                  }}
+                >
+                  {uploading ? 'Uploading...' : 'Upload photo'}
+                </button>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-3 gap-2 pb-6">
+                  {imageMoments.map(moment => {
+                    const isActive = moment.is_avatar
+                    const isSetting = settingDp === moment.id
+                    return (
+                      <button
+                        key={moment.id}
+                        onClick={() => handleSetAvatar(moment)}
+                        disabled={isSetting || !!settingDp}
+                        style={{
+                          aspectRatio: '1',
+                          borderRadius: 12,
+                          overflow: 'hidden',
+                          position: 'relative',
+                          border: isActive ? '2.5px solid var(--pink)' : '2.5px solid transparent',
+                          cursor: settingDp ? 'not-allowed' : 'pointer',
+                          padding: 0,
+                          opacity: settingDp && !isSetting ? 0.5 : 1,
+                          transition: 'opacity 200ms ease',
+                        }}
+                      >
+                        <img
+                          src={moment.storage_path}
+                          alt="Moment"
+                          style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                        />
+                        {/* Active checkmark overlay */}
+                        {isActive && (
+                          <div style={{
+                            position: 'absolute', inset: 0,
+                            background: 'rgba(255,45,107,0.25)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <div style={{
+                              width: 28, height: 28, borderRadius: '50%',
+                              background: 'var(--pink)',
+                              display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            }}>
+                              <svg width="14" height="11" viewBox="0 0 14 11" fill="none">
+                                <path d="M1 5.5L5 9.5L13 1.5" stroke="white" strokeWidth="1.5"
+                                  strokeLinecap="round" strokeLinejoin="round" />
+                              </svg>
+                            </div>
+                          </div>
+                        )}
+                        {/* Loading spinner overlay */}
+                        {isSetting && (
+                          <div style={{
+                            position: 'absolute', inset: 0,
+                            background: 'rgba(0,0,0,0.5)',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          }}>
+                            <div className="w-6 h-6 rounded-full border-2 border-t-transparent animate-spin"
+                              style={{ borderColor: 'white', borderTopColor: 'transparent' }} />
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+                {/* Upload another */}
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                  className="w-full py-3 rounded-full text-sm font-medium mb-6"
+                  style={{
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: 'rgba(255,255,255,0.6)',
+                    cursor: uploading ? 'not-allowed' : 'pointer',
+                    fontFamily: 'var(--font-body)',
+                    opacity: uploading ? 0.7 : 1,
+                  }}
+                >
+                  {uploading ? 'Uploading...' : '+ Upload new photo'}
+                </button>
+              </>
+            )}
+          </div>
+
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={handleUpload}
+          />
+        </>
       )}
 
       <style jsx>{`
