@@ -7,10 +7,10 @@ import { useUser } from '@/lib/hooks/useUser'
 import { useSupabase } from '@/lib/hooks/useSupabase'
 
 const CATEGORIES = [
-  { value: 'bug', label: '🐛 Something is broken', description: 'A feature isn\'t working as expected' },
+  { value: 'bug', label: '🐛 Something is broken', description: "A feature isn't working as expected" },
   { value: 'payment', label: '💳 Payment issue', description: 'A charge, refund, or credits problem' },
   { value: 'safety', label: '🚨 Safety concern', description: 'Harassment, abuse, or threatening behaviour' },
-  { value: 'account', label: '👤 Account issue', description: 'Can\'t access, login, or edit my account' },
+  { value: 'account', label: '👤 Account issue', description: "Can't access, login, or edit my account" },
   { value: 'match', label: '💔 Matching issue', description: 'Problem with a booking or Jinx' },
   { value: 'other', label: '💬 Other', description: 'Something else entirely' },
 ]
@@ -31,20 +31,20 @@ export default function ReportPage() {
     if (!description.trim() || !category) return
     setSubmitting(true)
 
-    await supabase.from('support_tickets').insert({
-      user_id: profile?.id,
-      category,
-      description: description.trim(),
-      status: 'open',
-      platform: 'web',
-    }).then(() => {
+    try {
+      await supabase.from('support_tickets').insert({
+        user_id: profile?.id,
+        category,
+        description: description.trim(),
+        status: 'open',
+        platform: 'web',
+      })
+    } catch {
+      // Silently fail — always show success to user
+    } finally {
       setStep('submitted')
       setSubmitting(false)
-    }).catch(() => {
-      // Even if DB insert fails, show success to user
-      setStep('submitted')
-      setSubmitting(false)
-    })
+    }
   }
 
   return (
@@ -73,7 +73,7 @@ export default function ReportPage() {
               Report a problem
             </h1>
             <p className="text-sm" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
-              {step === 'category' ? 'What\'s going on?' : 'Tell us more'}
+              {step === 'category' ? "What's going on?" : 'Tell us more'}
             </p>
           </>
         )}
@@ -89,10 +89,7 @@ export default function ReportPage() {
                 key={cat.value}
                 onClick={() => { setCategory(cat.value); setStep('details') }}
                 className="w-full flex items-center gap-4 p-4 rounded-2xl text-left transition-all duration-150"
-                style={{
-                  background: 'var(--bg-surface)',
-                  border: '1px solid var(--border)',
-                }}
+                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
               >
                 <div className="flex-1">
                   <p className="text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
@@ -149,7 +146,8 @@ export default function ReportPage() {
                   lineHeight: 1.6,
                 }}
               />
-              <p className="text-xs mt-1.5 text-right" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+              <p className="text-xs mt-1.5 text-right"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                 {description.length}/500
               </p>
             </div>
@@ -171,21 +169,19 @@ export default function ReportPage() {
               {submitting ? 'Sending...' : 'Submit report'}
             </button>
 
-            <p className="text-xs text-center" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+            <p className="text-xs text-center"
+              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               We review every report. Urgent safety issues are prioritised.
             </p>
           </div>
         )}
 
-        {/* Success state */}
+        {/* Success */}
         {step === 'submitted' && (
           <div className="flex flex-col items-center justify-center py-16 text-center px-4">
             <div
               className="w-16 h-16 rounded-2xl flex items-center justify-center mb-6"
-              style={{
-                background: 'rgba(0,217,126,0.1)',
-                border: '1px solid rgba(0,217,126,0.2)',
-              }}
+              style={{ background: 'rgba(0,217,126,0.1)', border: '1px solid rgba(0,217,126,0.2)' }}
             >
               <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
                 <path d="M5 14L11 20L23 8" stroke="#00D97E" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
@@ -194,7 +190,8 @@ export default function ReportPage() {
             <h2 className="font-display text-2xl mb-2" style={{ color: 'var(--text-primary)' }}>
               Report submitted
             </h2>
-            <p className="text-sm mb-8" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
+            <p className="text-sm mb-8"
+              style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
               Thanks for letting us know. We'll look into this and follow up if we need more details.
             </p>
             <button
