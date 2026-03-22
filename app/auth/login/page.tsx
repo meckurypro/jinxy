@@ -1,7 +1,7 @@
 // app/(auth)/login/page.tsx
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
@@ -12,11 +12,20 @@ export default function LoginPage() {
   const router = useRouter()
   const [step, setStep] = useState<Step>('method')
   const [email, setEmail] = useState('')
-  const [otp, setOtp] = useState(['', '', '', '', '', ''])
+  const [otp, setOtp] = useState('')         // single string, up to 8 digits
+  const [otpError, setOtpError] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [resendCooldown, setResendCooldown] = useState(0)
 
   const supabase = createClient()
+
+  // Resend cooldown timer
+  useEffect(() => {
+    if (resendCooldown <= 0) return
+    const t = setTimeout(() => setResendCooldown(c => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendCooldown])
 
   const handleGoogle = async () => {
     setLoading(true)
@@ -34,35 +43,45 @@ export default function LoginPage() {
       email,
       options: { shouldCreateUser: false },
     })
-    if (error) { setError(error.message) } else { setStep('otp') }
+    if (error) { setError(error.message) } else {
+      setStep('otp')
+      setResendCooldown(60)
+    }
     setLoading(false)
   }
 
-  const handleOtpChange = (index: number, value: string) => {
-    if (!/^\d*$/.test(value)) return
-    const newOtp = [...otp]
-    newOtp[index] = value.slice(-1)
-    setOtp(newOtp)
-    if (value && index < 5) document.getElementById(`otp-${index + 1}`)?.focus()
-    if (newOtp.every(d => d) && newOtp.join('').length === 6) verifyOtp(newOtp.join(''))
-  }
-
-  const handleOtpKeyDown = (index: number, e: React.KeyboardEvent) => {
-    if (e.key === 'Backspace' && !otp[index] && index > 0)
-      document.getElementById(`otp-${index - 1}`)?.focus()
+  const handleOtpChange = (value: string) => {
+    // Only allow digits, max 8
+    const clean = value.replace(/\D/g, '').slice(0, 8)
+    setOtp(clean)
+    setOtpError('')
+    // Auto-submit when 6 or 8 digits entered
+    if (clean.length >= 6) {
+      verifyOtp(clean)
+    }
   }
 
   const verifyOtp = async (token: string) => {
-    setLoading(true); setError('')
+    setLoading(true); setOtpError('')
     const { error } = await supabase.auth.verifyOtp({ email, token, type: 'email' })
     if (error) {
-      setError('Invalid code. Try again.')
-      setOtp(['', '', '', '', '', ''])
+      setOtpError('Invalid code. Check your email and try again.')
+      setOtp('')
       setLoading(false)
-      document.getElementById('otp-0')?.focus()
     } else {
       router.replace('/home')
     }
+  }
+
+  const handleResend = async () => {
+    if (resendCooldown > 0) return
+    setLoading(true); setOtpError('')
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { shouldCreateUser: false },
+    })
+    if (!error) setResendCooldown(60)
+    setLoading(false)
   }
 
   return (
@@ -80,7 +99,7 @@ export default function LoginPage() {
       <div className="relative px-6 pt-16 pb-8">
         {step !== 'method' && (
           <button
-            onClick={() => { setStep(step === 'otp' ? 'email' : 'method'); setError('') }}
+            onClick={() => { setStep(step === 'otp' ? 'email' : 'method'); setError(''); setOtpError(''); setOtp('') }}
             className="mb-8 flex items-center gap-2"
             style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}
           >
@@ -101,7 +120,7 @@ export default function LoginPage() {
         <p className="text-sm" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
           {step === 'method' && 'Good to see you again.'}
           {step === 'email' && "We'll send you a code to sign in."}
-          {step === 'otp' && `Code sent to ${email}`}
+          {step === 'otp' && `Sent to ${email}`}
         </p>
       </div>
 
@@ -152,6 +171,8 @@ export default function LoginPage() {
               <span>Continue with email</span>
             </button>
 
+            {error && <p className="text-xs text-center" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}>{error}</p>}
+
             <p className="mt-8 text-center text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
               Don't have an account?{' '}
               <Link href="/auth/signup" className="font-medium" style={{ color: 'var(--pink)' }}>
@@ -174,6 +195,16 @@ export default function LoginPage() {
                 onKeyDown={e => e.key === 'Enter' && handleEmailSubmit()}
                 autoFocus
                 autoComplete="email"
+                style={{
+                  width: '100%', padding: '14px 16px',
+                  background: 'var(--bg-input)',
+                  border: '1.5px solid var(--border)',
+                  borderRadius: 14,
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-body)',
+                  fontSize: 15,
+                  outline: 'none',
+                }}
               />
               {error && <p className="mt-2 text-xs" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}>{error}</p>}
             </div>
@@ -182,11 +213,13 @@ export default function LoginPage() {
               disabled={loading || !email}
               className="w-full py-4 rounded-full text-base font-semibold text-white"
               style={{
-                background: email ? 'var(--pink)' : 'var(--bg-overlay)',
+                background: 'var(--pink)',
                 border: 'none',
-                cursor: email ? 'pointer' : 'not-allowed',
+                cursor: (!email || loading) ? 'not-allowed' : 'pointer',
                 fontFamily: 'var(--font-body)',
-                boxShadow: email ? '0 4px 20px rgba(255,45,107,0.35)' : 'none',
+                boxShadow: '0 4px 20px rgba(255,45,107,0.35)',
+                opacity: (!email || loading) ? 0.5 : 1,
+                transition: 'opacity 200ms ease',
               }}
             >
               {loading ? <Spinner /> : 'Send code'}
@@ -194,43 +227,57 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* OTP */}
+        {/* OTP — single input, up to 8 digits */}
         {step === 'otp' && (
-          <div>
-            <div className="flex gap-2 mb-4 justify-between">
-              {otp.map((digit, i) => (
-                <input
-                  key={i}
-                  id={`otp-${i}`}
-                  type="tel"
-                  inputMode="numeric"
-                  maxLength={1}
-                  value={digit}
-                  onChange={e => handleOtpChange(i, e.target.value)}
-                  onKeyDown={e => handleOtpKeyDown(i, e)}
-                  className="text-center text-xl font-semibold"
-                  style={{
-                    width: 48, height: 56,
-                    background: 'var(--bg-input)',
-                    border: `1.5px solid ${digit ? 'var(--pink)' : 'var(--border)'}`,
-                    borderRadius: 14,
-                    color: 'var(--text-primary)',
-                    outline: 'none',
-                    transition: 'all 150ms ease',
-                    boxShadow: digit ? '0 0 0 3px rgba(255,45,107,0.15)' : 'none',
-                  }}
-                  autoFocus={i === 0}
-                />
-              ))}
+          <div className="space-y-3">
+            <div>
+              <input
+                type="tel"
+                inputMode="numeric"
+                style={{
+                  width: '100%', padding: '14px 16px',
+                  background: 'var(--bg-input)',
+                  border: `1.5px solid ${otp.length > 0 ? 'var(--pink)' : 'var(--border)'}`,
+                  borderRadius: 14,
+                  color: 'var(--text-primary)',
+                  fontFamily: 'var(--font-body)',
+                  fontSize: 28,
+                  fontWeight: 600,
+                  letterSpacing: '0.25em',
+                  textAlign: 'center',
+                  outline: 'none',
+                  boxShadow: otp.length > 0 ? '0 0 0 3px rgba(255,45,107,0.15)' : 'none',
+                  transition: 'all 150ms ease',
+                }}
+                placeholder="––––––––"
+                value={otp}
+                onChange={e => handleOtpChange(e.target.value)}
+                autoFocus
+                autoComplete="one-time-code"
+              />
+              {otpError && (
+                <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 12, marginTop: 8, textAlign: 'center' }}>
+                  {otpError}
+                </p>
+              )}
             </div>
-            {error && <p className="text-xs mb-4 text-center" style={{ color: 'var(--red)', fontFamily: 'var(--font-body)' }}>{error}</p>}
-            {loading && <div className="flex justify-center py-4"><Spinner /></div>}
+
+            {loading && <div className="flex justify-center py-2"><Spinner /></div>}
+
+            {/* Resend */}
             <button
-              onClick={() => { setOtp(['', '', '', '', '', '']); handleEmailSubmit() }}
-              className="w-full text-sm mt-2 py-3"
-              style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}
+              onClick={handleResend}
+              disabled={resendCooldown > 0 || loading}
+              style={{
+                width: '100%', padding: '12px',
+                background: 'none', border: 'none',
+                cursor: resendCooldown > 0 ? 'not-allowed' : 'pointer',
+                fontFamily: 'var(--font-body)', fontSize: 14,
+                color: resendCooldown > 0 ? 'var(--text-muted)' : 'var(--pink)',
+                transition: 'color 200ms ease',
+              }}
             >
-              Didn't receive a code? Resend
+              {resendCooldown > 0 ? `Resend in ${resendCooldown}s` : "Didn't receive a code? Resend"}
             </button>
           </div>
         )}
