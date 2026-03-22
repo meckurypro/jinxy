@@ -71,7 +71,10 @@ function PaymentContent() {
 
     if (data) {
       setBooking(data)
-      setJinx(data.users as Record<string, unknown>)
+      // Supabase returns joined rows as array — take first element
+      const usersRaw = data.users
+      const jinxData = Array.isArray(usersRaw) ? usersRaw[0] : usersRaw
+      setJinx(jinxData as unknown as Record<string, unknown>)
     }
     setLoading(false)
   }
