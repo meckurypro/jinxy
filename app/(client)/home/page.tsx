@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
-// Fake story data for UI
+// Dummy story data — replace with real Supabase fetch when stories feature is built
 const MOCK_STORIES = [
   { id: '1', username: 'Selena', avatar: null, hasNew: true },
   { id: '2', username: 'Clara', avatar: null, hasNew: true },
@@ -13,29 +13,101 @@ const MOCK_STORIES = [
   { id: '5', username: 'Amaka', avatar: null, hasNew: false },
 ]
 
+// Time-aware greeting line pools.
+// {name} is replaced at render time with the user's first name or username.
+const GREETING_LINES: Record<'morning' | 'afternoon' | 'evening' | 'night', string[]> = {
+  morning: [
+    "{name}, your next Jinx is up early too.",
+    "Good things happen to those who rise, {name}.",
+    "{name}, someone nearby is already thinking about you.",
+  ],
+  afternoon: [
+    "{name}, someone's around you.",
+    "Your next connection is closer than you think, {name}.",
+    "{name}, the vibe is right.",
+  ],
+  evening: [
+    "Good evening, {name}. The night is young.",
+    "{name}, love is just around the corner.",
+    "The best part of the day starts now, {name}.",
+  ],
+  night: [
+    "{name}, someone's still out there.",
+    "Night owl? So is your Jinx, {name}.",
+    "Late night energy, {name}. Find your Jinx.",
+  ],
+}
+
+function getTimeSlot(): 'morning' | 'afternoon' | 'evening' | 'night' {
+  const hour = new Date().getHours()
+  if (hour < 12) return 'morning'
+  if (hour < 17) return 'afternoon'
+  if (hour < 21) return 'evening'
+  return 'night'
+}
+
+function getGreetingLabel(slot: 'morning' | 'afternoon' | 'evening' | 'night'): string {
+  const map = {
+    morning: 'Good morning',
+    afternoon: 'Good afternoon',
+    evening: 'Good evening',
+    night: 'Good night',
+  }
+  return map[slot]
+}
+
 export default function HomePage() {
   const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [greeting, setGreeting] = useState('')
+  const [displayName, setDisplayName] = useState('')
   const [mapLoaded, setMapLoaded] = useState(false)
+  const [lineIndex, setLineIndex] = useState(0)
+  const [lineVisible, setLineVisible] = useState(true)
   const mapRef = useRef<HTMLDivElement>(null)
 
-  useEffect(() => {
-    const hour = new Date().getHours()
-    if (hour < 12) setGreeting('Good morning')
-    else if (hour < 17) setGreeting('Good afternoon')
-    else if (hour < 21) setGreeting('Good evening')
-    else setGreeting('Good night')
+  const timeSlot = getTimeSlot()
+  const greetingLabel = getGreetingLabel(timeSlot)
+  const lines = GREETING_LINES[timeSlot]
 
+  // Fetch display name from public.users (full_name preferred, username fallback)
+  useEffect(() => {
     const supabase = createClient()
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setUser(user)
+    supabase.auth.getUser().then(async ({ data: { user } }) => {
+      if (!user) return
+      const { data: profile } = await supabase
+        .from('users')
+        .select('full_name, username')
+        .eq('id', user.id)
+        .single()
+      if (profile) {
+        // Use first word of full_name if available, else username
+        const name = profile.full_name
+          ? profile.full_name.trim().split(' ')[0]
+          : profile.username
+        setDisplayName(name)
+      }
     })
 
     // Simulate map load
     const t = setTimeout(() => setMapLoaded(true), 800)
     return () => clearTimeout(t)
   }, [])
+
+  // Cycle through greeting lines every 6 seconds with a fade transition
+  useEffect(() => {
+    if (lines.length <= 1) return
+    const interval = setInterval(() => {
+      // Fade out
+      setLineVisible(false)
+      setTimeout(() => {
+        setLineIndex(i => (i + 1) % lines.length)
+        // Fade back in
+        setLineVisible(true)
+      }, 400)
+    }, 6000)
+    return () => clearInterval(interval)
+  }, [lines.length])
+
+  const currentLine = lines[lineIndex].replace('{name}', displayName || 'you')
 
   return (
     <div className="relative w-full" style={{ minHeight: '100dvh' }}>
@@ -46,14 +118,13 @@ export default function HomePage() {
         className="absolute inset-0 transition-opacity duration-700"
         style={{ opacity: mapLoaded ? 1 : 0 }}
       >
-        {/* Map placeholder — replace with actual Google Maps component */}
         <div
           className="w-full h-full"
           style={{
             background: 'linear-gradient(160deg, #0f1923 0%, #0a1520 50%, #0d1a2e 100%)',
           }}
         >
-          {/* Fake map grid lines */}
+          {/* Map grid lines */}
           <svg
             className="absolute inset-0 w-full h-full opacity-20"
             style={{ pointerEvents: 'none' }}
@@ -108,10 +179,7 @@ export default function HomePage() {
               {pin.type === 'active' && (
                 <div
                   className="absolute inset-0 rounded-full animate-ping"
-                  style={{
-                    background: 'rgba(255, 45, 107, 0.3)',
-                    animationDuration: '2s',
-                  }}
+                  style={{ background: 'rgba(255, 45, 107, 0.3)', animationDuration: '2s' }}
                 />
               )}
             </div>
@@ -172,7 +240,6 @@ export default function HomePage() {
                 <path d="M10 2C7.24 2 5 4.24 5 7V11L3 13V14H17V13L15 11V7C15 4.24 12.76 2 10 2Z" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
                 <path d="M8 14C8 15.1 8.9 16 10 16C11.1 16 12 15.1 12 14" stroke="white" strokeWidth="1.5" />
               </svg>
-              {/* Notification dot */}
               <div
                 className="absolute top-2 right-2 w-2 h-2 rounded-full"
                 style={{ background: 'var(--pink)', border: '1.5px solid var(--bg-base)' }}
@@ -180,41 +247,22 @@ export default function HomePage() {
             </button>
           </div>
 
-          {/* Stories */}
+          {/* Stories — Jinx stories only, no add button */}
           <div className="flex gap-3 overflow-x-auto pb-2" style={{ scrollbarWidth: 'none' }}>
-            {/* My story */}
-            <button className="flex flex-col items-center gap-1.5 flex-shrink-0">
-              <div
-                className="w-14 h-14 rounded-full flex items-center justify-center relative"
-                style={{
-                  background: 'var(--bg-elevated)',
-                  border: '2px solid rgba(255,255,255,0.1)',
-                }}
-              >
-                <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-                  <circle cx="10" cy="10" r="9" stroke="rgba(255,255,255,0.3)" strokeWidth="1.5" />
-                  <path d="M10 6V14M6 10H14" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5" strokeLinecap="round" />
-                </svg>
-                <div
-                  className="absolute -bottom-0.5 -right-0.5 w-5 h-5 rounded-full flex items-center justify-center"
-                  style={{ background: 'var(--pink)', border: '1.5px solid var(--bg-base)' }}
-                >
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-                    <path d="M5 2V8M2 5H8" stroke="white" strokeWidth="1.5" strokeLinecap="round" />
-                  </svg>
-                </div>
-              </div>
-              <span className="text-xs" style={{ color: 'rgba(255,255,255,0.5)', fontSize: 10 }}>My Story</span>
-            </button>
-
-            {/* Other stories */}
             {MOCK_STORIES.map(story => (
               <button
                 key={story.id}
                 className="flex flex-col items-center gap-1.5 flex-shrink-0"
                 onClick={() => router.push(`/story/${story.id}`)}
               >
-                <div className="avatar-ring w-14 h-14">
+                <div
+                  className="w-14 h-14 rounded-full p-0.5"
+                  style={{
+                    background: story.hasNew
+                      ? 'linear-gradient(135deg, #FF2D6B, #FF6B9D)'
+                      : 'rgba(255,255,255,0.15)',
+                  }}
+                >
                   <div
                     className="w-full h-full rounded-full flex items-center justify-center"
                     style={{
@@ -236,7 +284,7 @@ export default function HomePage() {
         </div>
       </div>
 
-      {/* BOTTOM OVERLAY — Find a Jinx CTA */}
+      {/* BOTTOM OVERLAY */}
       <div
         className="absolute bottom-0 left-0 right-0 z-10 px-5"
         style={{
@@ -246,11 +294,22 @@ export default function HomePage() {
       >
         {/* Greeting */}
         <div className="mb-4">
-          <p className="text-xs font-medium mb-0.5" style={{ color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}>
-            {greeting}
+          <p
+            className="text-xs font-medium mb-0.5"
+            style={{ color: 'rgba(255,255,255,0.4)', letterSpacing: '0.08em', textTransform: 'uppercase' }}
+          >
+            {greetingLabel}
           </p>
-          <p className="font-display text-lg" style={{ color: 'var(--text-primary)' }}>
-            {user?.user_metadata?.name?.split(' ')[0] || 'There'}'s someone around you.
+          {/* Rotating line with fade transition */}
+          <p
+            className="font-display text-lg"
+            style={{
+              color: 'var(--text-primary)',
+              opacity: lineVisible ? 1 : 0,
+              transition: 'opacity 400ms ease',
+            }}
+          >
+            {currentLine}
           </p>
         </div>
 
@@ -267,7 +326,6 @@ export default function HomePage() {
           Find a Jinx
         </button>
 
-        {/* Distance hint */}
         <p className="text-xs text-center mt-3" style={{ color: 'rgba(255,255,255,0.3)' }}>
           Showing available Jinxes near you
         </p>
