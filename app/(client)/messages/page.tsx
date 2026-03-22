@@ -5,7 +5,6 @@ import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/hooks/useUser'
 import { useSupabase } from '@/lib/hooks/useSupabase'
 import { Avatar } from '@/components/shared/Avatar'
-import { MessageSkeleton } from '@/components/shared/Skeleton'
 import { formatRelativeTime } from '@/lib/utils'
 
 interface ConversationItem {
@@ -24,6 +23,27 @@ interface ConversationItem {
   last_message_time: string | null
 }
 
+// Inline skeleton — no external component needed
+function ConversationsSkeleton() {
+  return (
+    <div className="divide-y" style={{ borderColor: 'var(--border)' }}>
+      {[1, 2, 3, 4].map(i => (
+        <div key={i} className="flex items-center gap-3 px-5 py-4">
+          <div
+            className="rounded-full flex-shrink-0"
+            style={{ width: 52, height: 52, background: 'var(--bg-elevated)' }}
+          />
+          <div className="flex-1 space-y-2">
+            <div style={{ height: 12, width: '35%', background: 'var(--bg-elevated)', borderRadius: 6 }} />
+            <div style={{ height: 10, width: '60%', background: 'var(--bg-elevated)', borderRadius: 6 }} />
+          </div>
+          <div style={{ height: 10, width: 28, background: 'var(--bg-elevated)', borderRadius: 6 }} />
+        </div>
+      ))}
+    </div>
+  )
+}
+
 export default function MessagesPage() {
   const router = useRouter()
   const { profile } = useUser()
@@ -39,12 +59,18 @@ export default function MessagesPage() {
   const fetchConversations = async () => {
     if (!profile?.id) return
 
+    // Fetch conversations with their most recent message in one go.
+    // We select messages ordered by created_at desc and limit 1 via
+    // a nested select — avoids N+1 round trips.
     const { data } = await supabase
       .from('conversations')
       .select(`
         id, booking_id, is_active, updated_at,
         jinx:users!conversations_jinx_id_fkey (
           id, username, full_name, avatar_url
+        ),
+        messages (
+          content, created_at, sender_id, is_read
         )
       `)
       .eq('client_id', profile.id)
@@ -52,33 +78,28 @@ export default function MessagesPage() {
       .order('updated_at', { ascending: false })
 
     if (data) {
-      // Fetch last message + unread count for each conversation
-      const enriched = await Promise.all(
-        (data as unknown as ConversationItem[]).map(async conv => {
-          const { data: msgs } = await supabase
-            .from('messages')
-            .select('content, created_at, sender_id, is_read')
-            .eq('conversation_id', conv.id)
-            .order('created_at', { ascending: false })
-            .limit(1)
+      const enriched: ConversationItem[] = (data as any[]).map(conv => {
+        // Messages come back unordered — sort desc and take the first
+        const sorted = (conv.messages ?? []).sort(
+          (a: any, b: any) =>
+            new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        )
+        const lastMsg = sorted[0] ?? null
+        const unread = sorted.filter(
+          (m: any) => !m.is_read && m.sender_id !== profile.id
+        ).length
 
-          const lastMsg = msgs?.[0]
-
-          const { count } = await supabase
-            .from('messages')
-            .select('*', { count: 'exact', head: true })
-            .eq('conversation_id', conv.id)
-            .eq('is_read', false)
-            .neq('sender_id', profile.id)
-
-          return {
-            ...conv,
-            last_message_content: lastMsg?.content ?? null,
-            last_message_time: lastMsg?.created_at ?? null,
-            unread_count: count ?? 0,
-          }
-        })
-      )
+        return {
+          id: conv.id,
+          booking_id: conv.booking_id,
+          is_active: conv.is_active,
+          updated_at: conv.updated_at,
+          jinx: conv.jinx,
+          last_message_content: lastMsg?.content ?? null,
+          last_message_time: lastMsg?.created_at ?? null,
+          unread_count: unread,
+        }
+      })
       setConversations(enriched)
     }
 
@@ -95,11 +116,8 @@ export default function MessagesPage() {
         </h1>
       </div>
 
-      {/* List */}
       {loading ? (
-        <div>
-          {[1, 2, 3].map(i => <MessageSkeleton key={i} />)}
-        </div>
+        <ConversationsSkeleton />
       ) : conversations.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center px-8">
           <div
@@ -107,14 +125,22 @@ export default function MessagesPage() {
             style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
           >
             <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-              <path d="M5 5H23C23.55 5 24 5.45 24 6V19C24 19.55 23.55 20 23 20H9L4 25V6C4 5.45 4.45 5 5 5Z"
-                stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              <path
+                d="M5 5H23C23.55 5 24 5.45 24 6V19C24 19.55 23.55 20 23 20H9L4 25V6C4 5.45 4.45 5 5 5Z"
+                stroke="var(--text-muted)"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
             </svg>
           </div>
           <p className="font-display text-xl mb-2" style={{ color: 'var(--text-secondary)' }}>
             No messages yet.
           </p>
-          <p className="text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+          <p
+            className="text-sm"
+            style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}
+          >
             Messages open once you've confirmed a Jinx and paid.
           </p>
         </div>
@@ -126,7 +152,9 @@ export default function MessagesPage() {
               onClick={() => router.push(`/messages/${conv.booking_id}`)}
               className="w-full flex items-center gap-3 px-5 py-4 text-left transition-all duration-150"
               style={{
-                background: conv.unread_count > 0 ? 'rgba(255,45,107,0.02)' : 'transparent',
+                background: conv.unread_count > 0
+                  ? 'rgba(255,45,107,0.02)'
+                  : 'transparent',
               }}
             >
               <div className="relative flex-shrink-0">
@@ -142,18 +170,24 @@ export default function MessagesPage() {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center justify-between mb-0.5">
                   <p
-                    className="text-sm font-medium truncate"
+                    className="text-sm truncate"
                     style={{
-                      color: conv.unread_count > 0 ? 'var(--text-primary)' : 'var(--text-secondary)',
+                      color: conv.unread_count > 0
+                        ? 'var(--text-primary)'
+                        : 'var(--text-secondary)',
                       fontFamily: 'var(--font-body)',
                       fontWeight: conv.unread_count > 0 ? 600 : 400,
                     }}
                   >
                     {conv.jinx?.full_name || conv.jinx?.username}
                   </p>
-                  <p className="text-xs flex-shrink-0 ml-2"
-                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                    {conv.last_message_time ? formatRelativeTime(conv.last_message_time) : ''}
+                  <p
+                    className="text-xs flex-shrink-0 ml-2"
+                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}
+                  >
+                    {conv.last_message_time
+                      ? formatRelativeTime(conv.last_message_time)
+                      : ''}
                   </p>
                 </div>
 
@@ -161,18 +195,24 @@ export default function MessagesPage() {
                   <p
                     className="text-xs truncate flex-1"
                     style={{
-                      color: conv.unread_count > 0 ? 'var(--text-secondary)' : 'var(--text-muted)',
+                      color: conv.unread_count > 0
+                        ? 'var(--text-secondary)'
+                        : 'var(--text-muted)',
                       fontFamily: 'var(--font-body)',
                     }}
                   >
-                    {conv.last_message_content ?? (conv.is_active ? 'Session active' : 'Session ended')}
+                    {conv.last_message_content ??
+                      (conv.is_active ? 'Session active' : 'Session ended')}
                   </p>
                   {conv.unread_count > 0 && (
                     <div
                       className="ml-2 w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
                       style={{ background: 'var(--pink)' }}
                     >
-                      <span className="text-white" style={{ fontSize: 10, fontFamily: 'var(--font-body)' }}>
+                      <span
+                        className="text-white"
+                        style={{ fontSize: 10, fontFamily: 'var(--font-body)' }}
+                      >
                         {conv.unread_count > 9 ? '9+' : conv.unread_count}
                       </span>
                     </div>
