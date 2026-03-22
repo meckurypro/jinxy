@@ -13,7 +13,6 @@ export async function GET(request: NextRequest) {
   }
 
   const cookieStore = await cookies()
-
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -34,38 +33,52 @@ export async function GET(request: NextRequest) {
   )
 
   const { error: sessionError } = await supabase.auth.exchangeCodeForSession(code)
-
   if (sessionError) {
     console.error('Session exchange error:', sessionError.message)
     return NextResponse.redirect(`${origin}/auth/login?error=auth_failed`)
   }
 
   const { data: { user } } = await supabase.auth.getUser()
-
   if (!user) {
     return NextResponse.redirect(`${origin}/auth/login?error=no_user`)
   }
 
-  // Check if user has a complete public profile
+  // Check if user has a complete public profile.
+  // A profile is only complete when username, date_of_birth, AND gender are all
+  // present. We deliberately do NOT use a hardcoded fallback date — any missing
+  // field means incomplete. This also handles the case where an admin deleted the
+  // user from auth.users but the old row remains in the users table: the auth UID
+  // changed on re-signup so maybeSingle() returns null → treated as new user.
   const { data: profile } = await supabase
     .from('users')
     .select('id, username, date_of_birth, gender')
     .eq('id', user.id)
     .maybeSingle()
 
-  // No profile at all, or profile is incomplete (placeholder DOB means never completed)
-  const isNewUser = !profile
-  const isIncomplete = profile && (
-    !profile.username ||
-    profile.date_of_birth === '2000-01-01' ||
-    !profile.gender
-  )
+  const isProfileComplete =
+    !!profile &&
+    !!profile.username &&
+    !!profile.date_of_birth &&
+    !!profile.gender
 
-  if (isNewUser || isIncomplete) {
-    // Redirect to profile completion page
-    return NextResponse.redirect(`${origin}/auth/complete-profile`)
+  const response = isProfileComplete
+    ? NextResponse.redirect(`${origin}${next}`)
+    : NextResponse.redirect(`${origin}/auth/complete-profile`)
+
+  // Set a lightweight cookie that middleware can read without a network call.
+  // This lets middleware block half-onboarded users from accessing protected routes.
+  // The cookie is intentionally not HttpOnly so the client can also read it if needed.
+  if (isProfileComplete) {
+    response.cookies.set('jinxy-profile-complete', '1', {
+      path: '/',
+      maxAge: 60 * 60 * 24 * 365, // 1 year
+      sameSite: 'lax',
+      secure: process.env.NODE_ENV === 'production',
+    })
+  } else {
+    // Clear it in case a stale one exists (e.g. deleted and re-signed up)
+    response.cookies.delete('jinxy-profile-complete')
   }
 
-  // Existing complete user — send to app
-  return NextResponse.redirect(`${origin}${next}`)
+  return response
 }
