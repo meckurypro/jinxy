@@ -19,7 +19,6 @@ interface Moment {
 
 const MAX_MOMENTS = 5
 
-// Convert a File to a base64 data URL for the cropper
 function readFileAsDataURL(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -39,15 +38,12 @@ export default function MomentsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  // Crop flow state
-  const [cropSrc, setCropSrc] = useState<string | null>(null)       // raw image src for cropper
-  const [pendingFile, setPendingFile] = useState<File | null>(null)  // original file (for video — skips cropper)
+  const [cropSrc, setCropSrc] = useState<string | null>(null)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
 
-  // Upload state
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
 
-  // Delete state
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
 
@@ -71,7 +67,6 @@ export default function MomentsPage() {
     setLoading(false)
   }
 
-  // Step 1 — user picks a file
   const handleFilePick = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !profile?.id) return
@@ -83,18 +78,15 @@ export default function MomentsPage() {
     const isVideo = file.type.startsWith('video')
 
     if (isVideo) {
-      // Videos skip the cropper — upload directly
       setPendingFile(file)
       await uploadBlob(file, 'video')
     } else {
-      // Images go through the cropper
       const dataUrl = await readFileAsDataURL(file)
       setCropSrc(dataUrl)
       setPendingFile(file)
     }
   }
 
-  // Step 2 — cropper confirms, we get a Blob
   const handleCropConfirm = async (blob: Blob) => {
     setCropSrc(null)
     await uploadBlob(blob, 'image')
@@ -105,31 +97,85 @@ export default function MomentsPage() {
     setPendingFile(null)
   }
 
-  // Step 3 — upload to Supabase storage (bucket: 'moments')
   const uploadBlob = async (data: Blob | File, mediaType: 'image' | 'video') => {
     if (!profile?.id) return
     setUploading(true)
     setUploadProgress(10)
 
-    const ext = mediaType === 'video' ? 'mp4' : 'jpg'
+    // ── Auth check ────────────────────────────────────────────────────────────
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      console.error('[moments] Auth error:', authError)
+      setError('Session expired. Please log in again.')
+      setUploading(false)
+      setUploadProgress(0)
+      return
+    }
+
+    if (user.id !== profile.id) {
+      console.error('[moments] UID mismatch — auth.uid:', user.id, 'profile.id:', profile.id)
+      setError('User identity mismatch. Please reload.')
+      setUploading(false)
+      setUploadProgress(0)
+      return
+    }
+
+    // ── Derive content type and extension from actual blob ────────────────────
+    const mimeType =
+      data instanceof File
+        ? data.type
+        : (data as Blob).type || (mediaType === 'video' ? 'video/mp4' : 'image/jpeg')
+
+    const extMap: Record<string, string> = {
+      'image/jpeg': 'jpg',
+      'image/png': 'png',
+      'image/webp': 'webp',
+      'video/mp4': 'mp4',
+      'video/quicktime': 'mov',
+    }
+    const ext = extMap[mimeType] ?? (mediaType === 'video' ? 'mp4' : 'jpg')
     const path = `${profile.id}/${Date.now()}.${ext}`
 
-    // Fake progress ticks — Supabase JS SDK doesn't expose upload progress
+    // ── Debug log ─────────────────────────────────────────────────────────────
+    console.log('[moments] === UPLOAD DEBUG ===')
+    console.log('[moments] auth.uid :', user.id)
+    console.log('[moments] profile.id:', profile.id)
+    console.log('[moments] path      :', path)
+    console.log('[moments] mime      :', mimeType)
+    console.log('[moments] size      :', data.size, 'bytes')
+    console.log('[moments] blob type :', data instanceof File ? 'File' : 'Blob')
+
+    // ── Fake progress ticker ──────────────────────────────────────────────────
     const ticker = setInterval(() => {
       setUploadProgress(p => Math.min(p + 8, 88))
     }, 300)
 
+    // ── Storage upload ────────────────────────────────────────────────────────
     const { data: uploadData, error: uploadError } = await supabase.storage
-      .from('moments')                      // ← correct bucket
+      .from('moments')
       .upload(path, data, {
         upsert: false,
-        contentType: mediaType === 'video' ? 'video/mp4' : 'image/jpeg',
+        contentType: mimeType,
       })
 
     clearInterval(ticker)
 
+    // ── Full error dump ───────────────────────────────────────────────────────
+    console.log('[moments] uploadData :', uploadData)
+    console.log('[moments] uploadError:', JSON.stringify(uploadError, null, 2))
     if (uploadError) {
-      setError(`Upload failed: ${uploadError.message}`)
+      console.error('[moments] statusCode :', (uploadError as any)?.statusCode)
+      console.error('[moments] error cause:', (uploadError as any)?.cause)
+    }
+
+    if (uploadError) {
+      const code = (uploadError as any)?.statusCode
+      const msg =
+        code === 403 ? 'Permission denied — RLS policy blocked the upload.' :
+        code === 404 ? 'Storage bucket not found.' :
+        code === 413 ? 'File too large.' :
+        uploadError.message || 'Upload failed.'
+      setError(`Upload failed (${code ?? 'unknown'}): ${msg}`)
       setUploading(false)
       setUploadProgress(0)
       return
@@ -140,6 +186,8 @@ export default function MomentsPage() {
     const { data: urlData } = supabase.storage
       .from('moments')
       .getPublicUrl(uploadData.path)
+
+    console.log('[moments] public URL:', urlData.publicUrl)
 
     const { error: insertError } = await supabase.from('media').insert({
       user_id: profile.id,
@@ -153,6 +201,7 @@ export default function MomentsPage() {
     })
 
     if (insertError) {
+      console.error('[moments] DB insert error:', insertError)
       setError(`Save failed: ${insertError.message}`)
     } else {
       setUploadProgress(100)
@@ -171,8 +220,6 @@ export default function MomentsPage() {
 
     const moment = moments.find(m => m.id === deleteConfirm)
     if (moment) {
-      // Extract storage key from public URL
-      // URL pattern: .../moments/{userId}/{filename}
       const url = new URL(moment.storage_path)
       const storagePath = url.pathname.split('/moments/')[1]
       if (storagePath) {
@@ -194,7 +241,6 @@ export default function MomentsPage() {
   const momentToDelete = moments.find(m => m.id === deleteConfirm)
   const canAdd = moments.length < MAX_MOMENTS && !uploading
 
-  // ─── Render crop UI (fullscreen, replaces page while active) ───────────────
   if (cropSrc) {
     return (
       <ImageCropper
@@ -349,7 +395,6 @@ export default function MomentsPage() {
                   <img src={moment.storage_path} alt="Moment" className="w-full h-full object-cover" />
                 )}
 
-                {/* Video badge */}
                 {moment.media_type === 'video' && (
                   <div className="absolute bottom-2 left-2 w-6 h-6 rounded-full flex items-center justify-center"
                     style={{ background: 'rgba(0,0,0,0.65)' }}>
@@ -359,7 +404,6 @@ export default function MomentsPage() {
                   </div>
                 )}
 
-                {/* DP badge */}
                 {moment.media_type === 'image' && moment.is_avatar && (
                   <div className="absolute bottom-2 left-2 px-1.5 py-0.5 rounded-full"
                     style={{ background: 'var(--pink)' }}>
@@ -369,7 +413,6 @@ export default function MomentsPage() {
                   </div>
                 )}
 
-                {/* Delete */}
                 <button
                   onClick={() => setDeleteConfirm(moment.id)}
                   className="absolute top-2 right-2 w-6 h-6 rounded-full flex items-center justify-center"
@@ -382,7 +425,6 @@ export default function MomentsPage() {
               </div>
             ))}
 
-            {/* Add slot */}
             {moments.length < MAX_MOMENTS && (
               <button
                 onClick={() => fileRef.current?.click()}
@@ -411,7 +453,6 @@ export default function MomentsPage() {
         </p>
       </div>
 
-      {/* Hidden file input — images and videos */}
       <input
         ref={fileRef}
         type="file"
