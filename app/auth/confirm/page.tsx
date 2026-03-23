@@ -1,30 +1,50 @@
 'use client'
 
-import { useEffect } from 'react'
+import { Suspense, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Suspense } from 'react'
+import { createClient } from '@/lib/supabase/client'
 
 function ConfirmInner() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const next = searchParams.get('next') ?? '/home'
+  const supabase = createClient()
 
   useEffect(() => {
-    // Set the cookie client-side — this is guaranteed to land before the
-    // next navigation because it happens synchronously before router.replace.
-    if (next !== '/auth/complete-profile') {
-      document.cookie = 'jinxy-profile-complete=1; path=/; max-age=31536000; SameSite=Lax'
-    } else {
-      // Clear stale cookie if profile is incomplete
-      document.cookie = 'jinxy-profile-complete=; path=/; max-age=0'
-    }
-    router.replace(next)
-  }, [next])
+    const run = async () => {
+      const { data: { user } } = await supabase.auth.getUser()
 
-  // Blank screen for the ~100ms this takes — or add your splash/spinner
+      if (!user) {
+        router.replace('/auth/login')
+        return
+      }
+
+      const { data: profile } = await supabase
+        .from('users')
+        .select('id, username, date_of_birth, gender')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      const isComplete =
+        !!profile?.username &&
+        !!profile?.date_of_birth &&
+        !!profile?.gender
+
+      if (isComplete) {
+        document.cookie = 'jinxy-profile-complete=1; path=/; max-age=31536000; SameSite=Lax'
+        router.replace(next)
+      } else {
+        document.cookie = 'jinxy-profile-complete=; path=/; max-age=0'
+        router.replace('/auth/complete-profile')
+      }
+    }
+
+    run()
+  }, [])
+
   return (
-    <div style={{ 
-      minHeight: '100dvh', 
+    <div style={{
+      minHeight: '100dvh',
       background: 'var(--bg-base)',
       display: 'flex',
       alignItems: 'center',
