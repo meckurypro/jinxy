@@ -1,3 +1,4 @@
+// components/shared/Sheet.tsx
 'use client'
 
 import { useEffect, useRef } from 'react'
@@ -8,35 +9,31 @@ interface SheetProps {
   children: React.ReactNode
   title?: string
   height?: 'auto' | 'half' | 'full'
+  zIndex?: number  // default 50, pass 60 to sit above bottom-nav
 }
 
-export function Sheet({ open, onClose, children, title, height = 'auto' }: SheetProps) {
+export function Sheet({
+  open,
+  onClose,
+  children,
+  title,
+  height = 'auto',
+  zIndex = 50,
+}: SheetProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
 
-  // Lock body scroll when open
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
+    document.body.style.overflow = open ? 'hidden' : ''
     return () => { document.body.style.overflow = '' }
   }, [open])
 
-  // Close on escape
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const heightMap = {
-    auto: 'auto',
-    half: '50dvh',
-    full: '90dvh',
-  }
+  const heightMap = { auto: 'auto', half: '50dvh', full: '90dvh' }
 
   if (!open) return null
 
@@ -45,8 +42,9 @@ export function Sheet({ open, onClose, children, title, height = 'auto' }: Sheet
       {/* Overlay */}
       <div
         ref={overlayRef}
-        className="fixed inset-0 z-50"
+        className="fixed inset-0"
         style={{
+          zIndex,
           background: 'rgba(0,0,0,0.7)',
           backdropFilter: 'blur(4px)',
           WebkitBackdropFilter: 'blur(4px)',
@@ -57,8 +55,9 @@ export function Sheet({ open, onClose, children, title, height = 'auto' }: Sheet
 
       {/* Sheet */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-50 max-w-app mx-auto"
+        className="fixed bottom-0 left-0 right-0 max-w-app mx-auto"
         style={{
+          zIndex: zIndex + 1, // always one above its own overlay
           background: 'var(--bg-surface)',
           borderRadius: '24px 24px 0 0',
           borderTop: '1px solid var(--border)',
@@ -70,36 +69,22 @@ export function Sheet({ open, onClose, children, title, height = 'auto' }: Sheet
       >
         {/* Handle */}
         <div className="flex justify-center pt-3 pb-1">
-          <div
-            className="rounded-full"
-            style={{
-              width: 36,
-              height: 4,
-              background: 'var(--bg-overlay)',
-            }}
-          />
+          <div className="rounded-full"
+            style={{ width: 36, height: 4, background: 'var(--bg-overlay)' }} />
         </div>
 
         {/* Title */}
         {title && (
-          <div
-            className="px-6 py-3 border-b"
-            style={{ borderColor: 'var(--border)' }}
-          >
-            <h3
-              className="font-display text-lg"
-              style={{ color: 'var(--text-primary)' }}
-            >
+          <div className="px-6 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
+            <h3 className="font-display text-lg" style={{ color: 'var(--text-primary)' }}>
               {title}
             </h3>
           </div>
         )}
 
         {/* Content */}
-        <div
-          className="overflow-y-auto"
-          style={{ maxHeight: height === 'full' ? '80dvh' : undefined }}
-        >
+        <div className="overflow-y-auto"
+          style={{ maxHeight: height === 'full' ? '80dvh' : undefined }}>
           {children}
         </div>
       </div>
