@@ -149,26 +149,33 @@ export default function FindPage() {
     // Animate progress to 100% over ~4 seconds, cycling through messages
     const DURATION = 4000
     const TICK = 80
-    const steps = DURATION / TICK
+    const totalTicks = DURATION / TICK
     let tick = 0
 
-    progressRef.current = setInterval(() => {
+    // Use window.setInterval explicitly to avoid NodeJS/browser type conflict
+    const intervalId = window.setInterval(() => {
       tick++
-      const pct = Math.min((tick / steps) * 100, 100)
+      const pct = Math.min((tick / totalTicks) * 100, 100)
       setBroadcastProgress(pct)
 
       // Cycle message every quarter of the duration
-      const msgIdx = Math.min(Math.floor(tick / (steps / BROADCAST_MESSAGES.length)), BROADCAST_MESSAGES.length - 1)
+      const msgIdx = Math.min(
+        Math.floor(tick / (totalTicks / BROADCAST_MESSAGES.length)),
+        BROADCAST_MESSAGES.length - 1
+      )
       setBroadcastMsgIdx(msgIdx)
 
       if (pct >= 100) {
-        clearInterval(progressRef.current!)
-        // Brief pause at 100% so user reads "Request sent!" then navigate home
-        setTimeout(() => {
+        window.clearInterval(intervalId)
+        // Brief pause at 100% so user reads "Request sent!" then go home
+        window.setTimeout(() => {
           router.replace('/home')
-        }, 600)
+        }, 700)
       }
-    }, TICK) as unknown as NodeJS.Timeout
+    }, TICK)
+
+    // Store as number so clearInterval works without type issues
+    progressRef.current = intervalId as unknown as NodeJS.Timeout
   }
 
   const handleCancelSearch = async () => {
@@ -267,12 +274,13 @@ export default function FindPage() {
             : 'You\'ll get a notification when a Jinx responds.\nFeel free to browse while you wait.'}
         </p>
 
-        {/* Cancel — only visible before done */}
+        {/* Cancel — only visible before done, sits above bottom nav */}
         {!isDone && (
           <button onClick={handleCancelSearch}
-            className="absolute bottom-16 text-sm z-10"
+            className="absolute text-sm z-10"
             style={{
-              color: 'rgba(255,255,255,0.25)', background: 'none',
+              bottom: 'calc(var(--nav-height, 72px) + var(--safe-bottom, 0px) + 20px)',
+              color: 'rgba(255,255,255,0.3)', background: 'none',
               border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)',
             }}>
             Cancel request
