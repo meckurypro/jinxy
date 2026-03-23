@@ -84,7 +84,7 @@ export function Sheet({
 
         {/* Content */}
         <div className="overflow-y-auto"
-          style={{ maxHeight: height === 'full' ? '80dvh' : undefined }}>
+          style={{ maxHeight: height === 'full' ? 'calc(80dvh - var(--nav-height, 72px))' : undefined }}>
           {children}
         </div>
       </div>
