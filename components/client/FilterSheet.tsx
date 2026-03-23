@@ -135,7 +135,7 @@ export function FilterSheet({ open, onClose, values, onChange, onApply }: Filter
   return (
     // zIndex 60 — above bottom-nav (z-50) and all map overlays
     <Sheet open={open} onClose={onClose} title="Filters" height="full" zIndex={60}>
-      <div style={{ paddingBottom: 40, overflowY: 'auto' }}>
+      <div style={{ overflowY: "auto", paddingBottom: "calc(var(--nav-height, 72px) + var(--safe-bottom, 0px) + 24px)" }}>
         <div className="px-6 space-y-8">
 
           {/* Interested in */}
