@@ -9,7 +9,7 @@ interface SheetProps {
   children: React.ReactNode
   title?: string
   height?: 'auto' | 'half' | 'full'
-  zIndex?: number  // default 50, pass 60 to sit above bottom-nav
+  zIndex?: number
 }
 
 export function Sheet({
@@ -21,6 +21,8 @@ export function Sheet({
   zIndex = 50,
 }: SheetProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
+  const touchStartY = useRef(0)
+  const touchStartX = useRef(0)
 
   useEffect(() => {
     document.body.style.overflow = open ? 'hidden' : ''
@@ -36,6 +38,18 @@ export function Sheet({
   const heightMap = { auto: 'auto', half: '50dvh', full: '90dvh' }
 
   if (!open) return null
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartY.current = e.touches[0].clientY
+    touchStartX.current = e.touches[0].clientX
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    const dy = e.changedTouches[0].clientY - touchStartY.current
+    const dx = Math.abs(e.changedTouches[0].clientX - touchStartX.current)
+    // Swipe down ≥ 80px, mostly vertical → close
+    if (dy > 80 && dx < 60) onClose()
+  }
 
   return (
     <>
@@ -53,11 +67,11 @@ export function Sheet({
         onClick={onClose}
       />
 
-      {/* Sheet */}
+      {/* Sheet — swipe down to close */}
       <div
         className="fixed bottom-0 left-0 right-0 max-w-app mx-auto"
         style={{
-          zIndex: zIndex + 1, // always one above its own overlay
+          zIndex: zIndex + 1,
           background: 'var(--bg-surface)',
           borderRadius: '24px 24px 0 0',
           borderTop: '1px solid var(--border)',
@@ -66,9 +80,11 @@ export function Sheet({
           animation: 'sheet-up 350ms cubic-bezier(0.32, 0.72, 0, 1)',
           paddingBottom: 'calc(var(--safe-bottom, 0px) + 8px)',
         }}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
       >
-        {/* Handle */}
-        <div className="flex justify-center pt-3 pb-1">
+        {/* Handle — tap to close too */}
+        <div className="flex justify-center pt-3 pb-1" onClick={onClose} style={{ cursor: 'pointer' }}>
           <div className="rounded-full"
             style={{ width: 36, height: 4, background: 'var(--bg-overlay)' }} />
         </div>
