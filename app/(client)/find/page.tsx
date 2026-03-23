@@ -48,12 +48,15 @@ export default function FindPage() {
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
 
-  // Broadcast state — brief animation then redirect to home
-  const [broadcastProgress, setBroadcastProgress] = useState(0)
+  // Broadcast state — CSS transition drives the bar, no interval needed
+  const [broadcastStarted, setBroadcastStarted] = useState(false) // triggers CSS 0→100%
+  const [broadcastDone, setBroadcastDone] = useState(false)       // triggers green state
   const [broadcastMsgIdx, setBroadcastMsgIdx] = useState(0)
   const [currentBookingId, setCurrentBookingId] = useState<string | null>(null)
-  const progressRef = useRef<NodeJS.Timeout | null>(null)
-  const msgRef = useRef<NodeJS.Timeout | null>(null)
+  const t1Ref = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const t2Ref = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const t3Ref = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const t4Ref = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Free Jinx reward
   const [activeReward, setActiveReward] = useState<FreeJinxReward | null>(null)
@@ -73,8 +76,10 @@ export default function FindPage() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      if (progressRef.current) clearInterval(progressRef.current)
-      if (msgRef.current) clearInterval(msgRef.current)
+      if (t1Ref.current) clearTimeout(t1Ref.current)
+      if (t2Ref.current) clearTimeout(t2Ref.current)
+      if (t3Ref.current) clearTimeout(t3Ref.current)
+      if (t4Ref.current) clearTimeout(t4Ref.current)
     }
   }, [])
 
@@ -98,9 +103,8 @@ export default function FindPage() {
   }
 
   // ─── Broadcast & go ───────────────────────────────────────────────────────
-  // Creates booking, shows a 4-second broadcast animation, then sends user
-  // to /home. Jinx responses come in async — user gets notified via the
-  // Jinxes tab dot + a toast. No waiting on this screen.
+  // Creates booking in DB, shows a 4.5s broadcast animation driven entirely
+  // by CSS transitions, then navigates home. No setInterval, no stale closure bugs.
   const handleSearch = async () => {
     const searchBudget = rewardMode && activeReward
       ? Math.max(activeReward.max_hourly_rate, budgetNum || activeReward.max_hourly_rate)
@@ -109,83 +113,63 @@ export default function FindPage() {
     if (!rewardMode && searchBudget < 1000) { setError('Minimum budget is ₦1,000'); return }
 
     setError('')
-    setStep('searching')
-    setBroadcastProgress(0)
+    setBroadcastStarted(false)
+    setBroadcastDone(false)
     setBroadcastMsgIdx(0)
+    setStep('searching')
 
-    // Create booking first
-    const { data: booking, error: bookingError } = await supabase
-      .from('bookings')
-      .insert({
-        client_id: profile?.id,
-        status: 'searching',
-        duration_tier: duration,
-        duration_hours: getDurationHours(duration),
-        client_budget: searchBudget,
-        is_adult: filters.includeAdult,
-        preferences: {
-          interested_in: filters.interestedIn,
-          preferred_ethnicity: filters.preferredEthnicity,
-          body_type: filters.bodyType,
-          age_min: filters.ageMin,
-          age_max: filters.ageMax,
-          ...(rewardMode && activeReward ? {
-            free_jinx_reward_id: activeReward.id,
-            reward_max_rate: activeReward.max_hourly_rate,
-          } : {}),
-        },
-      })
-      .select()
-      .single()
+    // Create booking in DB (fire and don't block the animation)
+    supabase.from('bookings').insert({
+      client_id: profile?.id,
+      status: 'searching',
+      duration_tier: duration,
+      duration_hours: getDurationHours(duration),
+      client_budget: searchBudget,
+      is_adult: filters.includeAdult,
+      preferences: {
+        interested_in: filters.interestedIn,
+        preferred_ethnicity: filters.preferredEthnicity,
+        body_type: filters.bodyType,
+        age_min: filters.ageMin,
+        age_max: filters.ageMax,
+        ...(rewardMode && activeReward ? {
+          free_jinx_reward_id: activeReward.id,
+          reward_max_rate: activeReward.max_hourly_rate,
+        } : {}),
+      },
+    }).select().single().then(({ data: booking }) => {
+      if (booking) setCurrentBookingId(booking.id)
+    })
 
-    if (bookingError || !booking) {
-      setStep('budget')
-      setError('Something went wrong. Try again.')
-      return
-    }
+    // 1. One frame delay → then trigger CSS transition (0% → 100% over 3.5s)
+    t1Ref.current = setTimeout(() => setBroadcastStarted(true), 50)
 
-    setCurrentBookingId(booking.id)
+    // 2. Cycle messages at 1.1s intervals
+    t2Ref.current = setTimeout(() => setBroadcastMsgIdx(1), 1100)
+    t3Ref.current = setTimeout(() => setBroadcastMsgIdx(2), 2200)
 
-    // Animate progress to 100% over ~4 seconds, cycling through messages
-    const DURATION = 4000
-    const TICK = 80
-    const totalTicks = DURATION / TICK
-    let tick = 0
-
-    // Use window.setInterval explicitly to avoid NodeJS/browser type conflict
-    const intervalId = window.setInterval(() => {
-      tick++
-      const pct = Math.min((tick / totalTicks) * 100, 100)
-      setBroadcastProgress(pct)
-
-      // Cycle message every quarter of the duration
-      const msgIdx = Math.min(
-        Math.floor(tick / (totalTicks / BROADCAST_MESSAGES.length)),
-        BROADCAST_MESSAGES.length - 1
-      )
-      setBroadcastMsgIdx(msgIdx)
-
-      if (pct >= 100) {
-        window.clearInterval(intervalId)
-        // Brief pause at 100% so user reads "Request sent!" then go home
-        window.setTimeout(() => {
-          router.replace('/home')
-        }, 700)
-      }
-    }, TICK)
-
-    // Store as number so clearInterval works without type issues
-    progressRef.current = intervalId as unknown as NodeJS.Timeout
+    // 3. At 3.8s: mark done (green state + "Request sent!" message)
+    t4Ref.current = setTimeout(() => {
+      setBroadcastDone(true)
+      setBroadcastMsgIdx(3)
+      // 4. After 0.8s more: navigate home
+      setTimeout(() => router.replace('/home'), 800)
+    }, 3800)
   }
 
   const handleCancelSearch = async () => {
-    if (progressRef.current) clearInterval(progressRef.current)
-    if (msgRef.current) clearInterval(msgRef.current)
+    // Clear all pending timers
+    if (t1Ref.current) clearTimeout(t1Ref.current)
+    if (t2Ref.current) clearTimeout(t2Ref.current)
+    if (t3Ref.current) clearTimeout(t3Ref.current)
+    if (t4Ref.current) clearTimeout(t4Ref.current)
     if (currentBookingId) {
       await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', currentBookingId)
     }
+    setBroadcastStarted(false)
+    setBroadcastDone(false)
+    setBroadcastMsgIdx(0)
     setStep('budget')
-    setBroadcastProgress(0)
   }
 
   const daysLeft = activeReward
@@ -193,21 +177,20 @@ export default function FindPage() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  // BROADCAST screen — fullscreen, auto-advances to home after ~4s
+  // BROADCAST screen — CSS transition drives bar from 0→100%, no interval
   if (step === 'searching') {
-    const isDone = broadcastProgress >= 100
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center"
         style={{ background: 'linear-gradient(160deg, #0D0518 0%, #0a0a14 100%)', zIndex: 100 }}>
 
-        {/* Radar rings — broadcasting outward */}
+        {/* Radar rings */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
           {[1, 2, 3, 4, 5].map(i => (
             <div key={i} className="absolute rounded-full border" style={{
               width: `${i * 20}vw`, height: `${i * 20}vw`,
               maxWidth: `${i * 100}px`, maxHeight: `${i * 100}px`,
               borderColor: `rgba(255,45,107,${0.2 - i * 0.03})`,
-              animation: `radar-pulse 3s ease-out ${i * 0.6}s infinite`,
+              animation: broadcastDone ? 'none' : `radar-pulse 3s ease-out ${i * 0.6}s infinite`,
             }} />
           ))}
         </div>
@@ -215,24 +198,20 @@ export default function FindPage() {
         {/* Central icon */}
         <div className="relative mb-8 z-10">
           <div className="w-20 h-20 rounded-2xl flex items-center justify-center" style={{
-            background: isDone
+            background: broadcastDone
               ? 'linear-gradient(135deg, rgba(0,217,126,0.25), rgba(0,180,100,0.15))'
               : 'linear-gradient(135deg, rgba(255,45,107,0.25), rgba(180,20,60,0.15))',
-            border: `1.5px solid ${isDone ? 'rgba(0,217,126,0.5)' : 'rgba(255,45,107,0.4)'}`,
-            boxShadow: isDone
-              ? '0 0 40px rgba(0,217,126,0.3)'
-              : '0 0 40px rgba(255,45,107,0.3)',
+            border: `1.5px solid ${broadcastDone ? 'rgba(0,217,126,0.5)' : 'rgba(255,45,107,0.4)'}`,
+            boxShadow: broadcastDone ? '0 0 40px rgba(0,217,126,0.3)' : '0 0 40px rgba(255,45,107,0.3)',
             transition: 'all 400ms ease',
-            animation: isDone ? 'none' : 'glow-pulse 2s ease-in-out infinite',
+            animation: broadcastDone ? 'none' : 'glow-pulse 2s ease-in-out infinite',
           }}>
-            {isDone ? (
-              // Checkmark when done
+            {broadcastDone ? (
               <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
                 <path d="M6 16l7 7 13-13" stroke="#00D97E" strokeWidth="2.5"
                   strokeLinecap="round" strokeLinejoin="round" />
               </svg>
             ) : (
-              // Broadcast / signal icon
               <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
                 <circle cx="18" cy="20" r="4" fill="rgba(255,45,107,0.9)" />
                 <path d="M9 11C11.8 8.2 15.2 6.5 18 6.5C20.8 6.5 24.2 8.2 27 11"
@@ -244,23 +223,26 @@ export default function FindPage() {
           </div>
         </div>
 
-        {/* Progress bar */}
-        <div className="w-56 h-1 rounded-full mb-3 overflow-hidden z-10"
-          style={{ background: 'rgba(255,255,255,0.08)' }}>
-          <div className="h-full rounded-full"
-            style={{
-              width: `${broadcastProgress}%`,
-              background: isDone
-                ? 'linear-gradient(90deg, #00D97E, #00B864)'
-                : 'linear-gradient(90deg, #C41751, #FF2D6B)',
-              transition: 'width 80ms linear, background 400ms ease',
-            }} />
+        {/* Progress bar — CSS transition does all the work, no JS animation loop */}
+        <div className="w-56 mb-6 z-10" style={{ height: 3, borderRadius: 9999, background: 'rgba(255,255,255,0.08)' }}>
+          <div style={{
+            height: '100%',
+            borderRadius: 9999,
+            // When broadcastStarted flips true, CSS animates from 0→100% over 3.5s
+            width: broadcastStarted ? '100%' : '0%',
+            background: broadcastDone
+              ? 'linear-gradient(90deg, #00D97E, #00B864)'
+              : 'linear-gradient(90deg, #C41751, #FF2D6B)',
+            transition: broadcastStarted
+              ? 'width 3.5s cubic-bezier(0.4, 0, 0.2, 1), background 400ms ease'
+              : 'none',
+          }} />
         </div>
 
         {/* Message */}
         <h2 className="font-display text-xl text-center mb-3 px-10 z-10"
           style={{
-            color: isDone ? 'rgba(0,217,126,0.9)' : 'rgba(255,255,255,0.9)',
+            color: broadcastDone ? 'rgba(0,217,126,0.9)' : 'rgba(255,255,255,0.9)',
             lineHeight: 1.35, transition: 'color 400ms ease',
           }}>
           {BROADCAST_MESSAGES[broadcastMsgIdx]}
@@ -268,14 +250,14 @@ export default function FindPage() {
 
         {/* Subtitle */}
         <p className="text-xs text-center px-10 z-10"
-          style={{ color: 'rgba(255,255,255,0.25)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
-          {isDone
-            ? 'Taking you back to home...'
-            : 'You\'ll get a notification when a Jinx responds.\nFeel free to browse while you wait.'}
+          style={{ color: 'rgba(255,255,255,0.22)', fontFamily: 'var(--font-body)', lineHeight: 1.7 }}>
+          {broadcastDone
+            ? 'Taking you back...'
+            : 'You\'ll be notified when a Jinx responds.\nFeel free to browse while you wait.'}
         </p>
 
-        {/* Cancel — only visible before done, sits above bottom nav */}
-        {!isDone && (
+        {/* Cancel — above bottom nav */}
+        {!broadcastDone && (
           <button onClick={handleCancelSearch}
             className="absolute text-sm z-10"
             style={{
