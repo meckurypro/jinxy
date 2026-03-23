@@ -1,3 +1,4 @@
+// app/(client)/jinxes/page.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -21,7 +22,15 @@ interface Booking {
     username: string
     full_name: string | null
     avatar_url: string | null
-  }
+  } | null
+}
+
+interface PendingBooking {
+  id: string
+  created_at: string
+  duration_tier: string
+  client_budget: number
+  response_count: number
 }
 
 const STATUS_TAG: Record<string, { label: string; color: string; bg: string }> = {
@@ -34,20 +43,14 @@ const STATUS_TAG: Record<string, { label: string; color: string; bg: string }> =
 
 const FILTERS: Filter[] = ['all', 'ongoing', 'completed', 'missed']
 
-// Inline skeleton — no external component needed
 function BookingsSkeleton() {
   return (
     <div className="space-y-3 mt-3">
-      {[1, 2, 3, 4].map(i => (
-        <div
-          key={i}
-          className="w-full flex items-center gap-3 p-3 rounded-2xl"
-          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-        >
-          <div
-            className="rounded-full flex-shrink-0"
-            style={{ width: 48, height: 48, background: 'var(--bg-elevated)' }}
-          />
+      {[1, 2, 3].map(i => (
+        <div key={i} className="flex items-center gap-3 p-3 rounded-2xl"
+          style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}>
+          <div className="rounded-full flex-shrink-0"
+            style={{ width: 48, height: 48, background: 'var(--bg-elevated)' }} />
           <div className="flex-1 space-y-2">
             <div style={{ height: 12, width: '40%', background: 'var(--bg-elevated)', borderRadius: 6 }} />
             <div style={{ height: 10, width: '25%', background: 'var(--bg-elevated)', borderRadius: 6 }} />
@@ -69,6 +72,7 @@ export default function JinxesPage() {
 
   const [filter, setFilter] = useState<Filter>('all')
   const [bookings, setBookings] = useState<Booking[]>([])
+  const [pendingBookings, setPendingBookings] = useState<PendingBooking[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -79,7 +83,8 @@ export default function JinxesPage() {
     if (!profile?.id) return
     setLoading(true)
 
-    const { data } = await supabase
+    // Fetch completed/active bookings (jinx assigned)
+    const { data: bookingData } = await supabase
       .from('bookings')
       .select(`
         id, status, duration_tier, total_charged, created_at, scheduled_at,
@@ -88,10 +93,32 @@ export default function JinxesPage() {
         )
       `)
       .eq('client_id', profile.id)
-      .not('jinx_id', 'is', null)
+      .not('status', 'in', '("searching","pending_payment")')
       .order('created_at', { ascending: false })
 
-    if (data) setBookings(data as unknown as Booking[])
+    // Fetch searching bookings (no Jinx yet) with response count
+    const { data: searchingData } = await supabase
+      .from('bookings')
+      .select(`
+        id, created_at, duration_tier, client_budget,
+        booking_responses(count)
+      `)
+      .eq('client_id', profile.id)
+      .eq('status', 'searching')
+      .order('created_at', { ascending: false })
+
+    if (bookingData) setBookings(bookingData as unknown as Booking[])
+
+    if (searchingData) {
+      setPendingBookings(searchingData.map((b: Record<string, unknown>) => ({
+        id: b.id as string,
+        created_at: b.created_at as string,
+        duration_tier: b.duration_tier as string,
+        client_budget: b.client_budget as number,
+        response_count: (b.booking_responses as { count: number }[])?.[0]?.count ?? 0,
+      })))
+    }
+
     setLoading(false)
   }
 
@@ -108,10 +135,7 @@ export default function JinxesPage() {
 
       {/* Header */}
       <div className="px-5 pt-14 pb-2">
-        <h1
-          className="font-display text-2xl mb-4"
-          style={{ color: 'var(--text-primary)' }}
-        >
+        <h1 className="font-display text-2xl mb-4" style={{ color: 'var(--text-primary)' }}>
           My Jinxes
         </h1>
 
@@ -136,116 +160,185 @@ export default function JinxesPage() {
         </div>
       </div>
 
-      {/* Content */}
       <div className="px-5 pb-6">
         {loading ? (
           <BookingsSkeleton />
-        ) : filteredBookings.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            {/* Empty icon */}
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}
-            >
-              <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
-                <path
-                  d="M14 4C14 4 6 9 6 15C6 19.42 9.58 23 14 23C18.42 23 22 19.42 22 15C22 9 14 4 14 4Z"
-                  stroke="var(--text-muted)" strokeWidth="1.5" fill="none"
-                />
-                <path d="M14 10V16M11 13H17" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            </div>
-            <p
-              className="font-display text-xl mb-2"
-              style={{ color: 'var(--text-secondary)' }}
-            >
-              {filter === 'all' ? 'No Jinxes yet.' : `No ${filter} Jinxes.`}
-            </p>
-            <p
-              className="text-sm mb-6"
-              style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}
-            >
-              {filter === 'all' ? 'The night is young.' : 'Try a different filter.'}
-            </p>
-            {filter === 'all' && (
-              <button
-                onClick={() => router.push('/find')}
-                className="px-6 py-3 rounded-full text-sm font-medium text-white"
-                style={{
-                  background: 'var(--pink)',
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-body)',
-                  boxShadow: '0 4px 20px rgba(255,45,107,0.35)',
-                }}
-              >
-                Find a Jinx
-              </button>
-            )}
-          </div>
         ) : (
-          <div className="space-y-3 mt-3">
-            {filteredBookings.map(booking => {
-              const tag = STATUS_TAG[booking.status] ?? STATUS_TAG.completed
-              return (
-                <button
-                  key={booking.id}
-                  onClick={() => router.push(`/jinxes/${booking.id}`)}
-                  className="w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all duration-200"
-                  style={{
-                    background: 'var(--bg-surface)',
-                    border: '1px solid var(--border)',
-                  }}
-                >
-                  <Avatar
-                    src={booking.jinx?.avatar_url}
-                    name={booking.jinx?.full_name || booking.jinx?.username || 'J'}
-                    size={48}
-                    showStatus={booking.status === 'active'}
-                    status="available"
-                  />
-                  <div className="flex-1 min-w-0">
-                    <p
-                      className="text-sm font-medium truncate"
-                      style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}
+          <>
+            {/* Pending / Searching bookings — shown above the filter */}
+            {pendingBookings.length > 0 && filter === 'all' && (
+              <div className="mt-4 mb-2">
+                <p className="text-xs font-medium uppercase tracking-widest mb-2"
+                  style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  Searching
+                </p>
+                <div className="space-y-2">
+                  {pendingBookings.map(pb => (
+                    <button
+                      key={pb.id}
+                      onClick={() => router.push(`/jinxes/${pb.id}`)}
+                      className="w-full flex items-center gap-3 p-3 rounded-2xl text-left"
+                      style={{
+                        background: 'rgba(255,45,107,0.04)',
+                        border: '1.5px solid rgba(255,45,107,0.2)',
+                      }}
                     >
-                      {booking.jinx?.full_name || booking.jinx?.username}
-                    </p>
-                    <div className="flex items-center gap-2 mt-0.5">
-                      <span
-                        className="text-xs px-2 py-0.5 rounded-full"
-                        style={{ background: tag.bg, color: tag.color, fontFamily: 'var(--font-body)' }}
-                      >
-                        {tag.label}
-                      </span>
-                      <p
-                        className="text-xs"
-                        style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}
-                      >
-                        {formatRelativeTime(booking.created_at)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="text-right flex-shrink-0">
-                    <p
-                      className="text-sm font-semibold"
-                      style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}
+                      {/* Pulsing antenna icon */}
+                      <div className="relative flex-shrink-0 w-12 h-12 rounded-full flex items-center justify-center"
+                        style={{ background: 'rgba(255,45,107,0.1)' }}>
+                        <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
+                          <circle cx="10" cy="12" r="3" fill="rgba(255,45,107,0.8)" />
+                          <path d="M4 6C5.8 4.2 7.8 3 10 3C12.2 3 14.2 4.2 16 6"
+                            stroke="rgba(255,45,107,0.5)" strokeWidth="1.5" strokeLinecap="round" />
+                          <path d="M1.5 3.5C4.3 0.7 7 0 10 0C13 0 15.7 0.7 18.5 3.5"
+                            stroke="rgba(255,45,107,0.25)" strokeWidth="1.5" strokeLinecap="round" />
+                        </svg>
+                        {/* Pulse ring */}
+                        <div className="absolute inset-0 rounded-full"
+                          style={{
+                            border: '1.5px solid rgba(255,45,107,0.4)',
+                            animation: 'ping-slow 2s ease-out infinite',
+                          }} />
+                      </div>
+
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium mb-0.5"
+                          style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+                          Request sent · {pb.duration_tier}
+                        </p>
+                        <p className="text-xs"
+                          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                          {formatRelativeTime(pb.created_at)} ·{' '}
+                          {pb.response_count > 0
+                            ? `${pb.response_count} Jinx${pb.response_count > 1 ? 'es' : ''} interested`
+                            : 'Waiting for responses'}
+                        </p>
+                      </div>
+
+                      {pb.response_count > 0 ? (
+                        <div className="flex-shrink-0 flex flex-col items-end gap-1">
+                          <span
+                            className="px-2 py-0.5 rounded-full text-xs font-semibold"
+                            style={{
+                              background: 'rgba(255,45,107,0.15)',
+                              color: 'var(--pink)',
+                              fontFamily: 'var(--font-body)',
+                            }}
+                          >
+                            {pb.response_count} interested
+                          </span>
+                          <p className="text-xs" style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}>
+                            Tap to review →
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="flex-shrink-0">
+                          <div style={{
+                            width: 8, height: 8, borderRadius: '50%',
+                            background: 'var(--pink)',
+                            animation: 'ping-slow 1.5s ease-out infinite',
+                          }} />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Regular bookings */}
+            {filteredBookings.length === 0 && pendingBookings.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-24 text-center">
+                <div className="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
+                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
+                  <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+                    <path d="M14 4C14 4 6 9 6 15C6 19.42 9.58 23 14 23C18.42 23 22 19.42 22 15C22 9 14 4 14 4Z"
+                      stroke="var(--text-muted)" strokeWidth="1.5" fill="none" />
+                  </svg>
+                </div>
+                <p className="font-display text-xl mb-2" style={{ color: 'var(--text-secondary)' }}>
+                  {filter === 'all' ? 'No Jinxes yet.' : `No ${filter} Jinxes.`}
+                </p>
+                <p className="text-sm mb-6" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  {filter === 'all' ? 'The night is young.' : 'Try a different filter.'}
+                </p>
+                {filter === 'all' && (
+                  <button
+                    onClick={() => router.push('/find')}
+                    className="px-6 py-3 rounded-full text-sm font-medium text-white"
+                    style={{
+                      background: 'var(--pink)', border: 'none', cursor: 'pointer',
+                      fontFamily: 'var(--font-body)',
+                      boxShadow: '0 4px 20px rgba(255,45,107,0.35)',
+                    }}
+                  >
+                    Find a Jinx
+                  </button>
+                )}
+              </div>
+            ) : filteredBookings.length === 0 ? (
+              <p className="text-center py-12 text-sm"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                No {filter} Jinxes.
+              </p>
+            ) : (
+              <div className="space-y-3 mt-3">
+                {filteredBookings.map(booking => {
+                  const tag = STATUS_TAG[booking.status] ?? STATUS_TAG.completed
+                  return (
+                    <button
+                      key={booking.id}
+                      onClick={() => router.push(`/jinxes/${booking.id}`)}
+                      className="w-full flex items-center gap-3 p-3 rounded-2xl text-left transition-all duration-200"
+                      style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
                     >
-                      {formatCurrency(booking.total_charged ?? 0)}
-                    </p>
-                    <p
-                      className="text-xs capitalize"
-                      style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}
-                    >
-                      {booking.duration_tier}
-                    </p>
-                  </div>
-                </button>
-              )
-            })}
-          </div>
+                      <Avatar
+                        src={booking.jinx?.avatar_url ?? null}
+                        name={booking.jinx?.full_name || booking.jinx?.username || 'J'}
+                        size={48}
+                        showStatus={booking.status === 'active'}
+                        status="available"
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate"
+                          style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+                          {booking.jinx?.full_name || booking.jinx?.username}
+                        </p>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="text-xs px-2 py-0.5 rounded-full"
+                            style={{ background: tag.bg, color: tag.color, fontFamily: 'var(--font-body)' }}>
+                            {tag.label}
+                          </span>
+                          <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                            {formatRelativeTime(booking.created_at)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-sm font-semibold"
+                          style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}>
+                          {formatCurrency(booking.total_charged ?? 0)}
+                        </p>
+                        <p className="text-xs capitalize"
+                          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                          {booking.duration_tier}
+                        </p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+            )}
+          </>
         )}
       </div>
+
+      <style jsx>{`
+        @keyframes ping-slow {
+          0%   { transform: scale(1); opacity: 0.8; }
+          100% { transform: scale(2); opacity: 0; }
+        }
+      `}</style>
     </div>
   )
 }
