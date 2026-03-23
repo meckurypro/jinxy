@@ -12,7 +12,7 @@ export interface FilterValues {
   includeAdult: boolean
 }
 
-const ETHNICITIES = ['Yoruba', 'Igbo', 'Hausa', 'Ijaw', 'Efik', 'Edo', 'Tiv', 'Other']
+const ETHNICITIES = ['Edo', 'Efik', 'Hausa', 'Igbo', 'Ijaw', 'Other', 'Tiv', 'Yoruba']
 const BODY_TYPES   = ['Slim', 'Athletic', 'Average', 'Curvy', 'Plus size', 'Muscular']
 const AGE_MIN = 18
 const AGE_MAX = 60
