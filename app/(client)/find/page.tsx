@@ -5,26 +5,11 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { DurationPicker, type DurationTier } from '@/components/client/DurationPicker'
 import { FilterSheet, type FilterValues } from '@/components/client/FilterSheet'
-import { Avatar } from '@/components/shared/Avatar'
 import { formatCurrency, calculateTierPrice } from '@/lib/utils'
 import { useSupabase } from '@/lib/hooks/useSupabase'
 import { useUser } from '@/lib/hooks/useUser'
 
-type Step = 'welcome' | 'budget' | 'searching' | 'results'
-
-interface MatchedJinx {
-  id: string
-  username: string
-  full_name: string | null
-  avatar_url: string | null
-  average_rating: number | null
-  total_jinxes: number | null
-  is_premium: boolean
-  operating_area: string | null
-  agreed_rate: number
-  transport_fare: number
-  total_cost: number
-}
+type Step = 'welcome' | 'budget' | 'searching'
 
 interface FreeJinxReward {
   id: string
@@ -43,11 +28,12 @@ const DEFAULT_FILTERS: FilterValues = {
   includeAdult: false,
 }
 
-const SEARCH_MESSAGES = [
-  'Scanning available Jinxes near you...',
-  'Checking availability and ratings...',
-  'Matching your preferences...',
-  'Almost there...',
+// Broadcast animation messages — gives impression of sending out, not waiting
+const BROADCAST_MESSAGES = [
+  'Sending your request to nearby Jinxes...',
+  'Notifying available Jinxes in your area...',
+  'Your request is live — Jinxes are reviewing it...',
+  'Request sent! You\'ll hear back soon.',
 ]
 
 export default function FindPage() {
@@ -62,20 +48,12 @@ export default function FindPage() {
   const [budget, setBudget] = useState('')
   const [error, setError] = useState('')
 
-  // Searching state
-  const [searchProgress, setSearchProgress] = useState(0)
-  const [searchMsgIdx, setSearchMsgIdx] = useState(0)
+  // Broadcast state — brief animation then redirect to home
+  const [broadcastProgress, setBroadcastProgress] = useState(0)
+  const [broadcastMsgIdx, setBroadcastMsgIdx] = useState(0)
   const [currentBookingId, setCurrentBookingId] = useState<string | null>(null)
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const progressRef = useRef<NodeJS.Timeout | null>(null)
   const msgRef = useRef<NodeJS.Timeout | null>(null)
-  const timeoutRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Results state
-  const [matches, setMatches] = useState<MatchedJinx[]>([])
-  const [selected, setSelected] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState(false)
-  const [noMatchAdvice, setNoMatchAdvice] = useState('')
 
   // Free Jinx reward
   const [activeReward, setActiveReward] = useState<FreeJinxReward | null>(null)
@@ -95,10 +73,8 @@ export default function FindPage() {
   // Cleanup on unmount
   useEffect(() => {
     return () => {
-      channelRef.current?.unsubscribe()
       if (progressRef.current) clearInterval(progressRef.current)
       if (msgRef.current) clearInterval(msgRef.current)
-      if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
   }, [])
 
@@ -121,7 +97,10 @@ export default function FindPage() {
     return map[tier]
   }
 
-  // ─── Start search ──────────────────────────────────────────────────────────
+  // ─── Broadcast & go ───────────────────────────────────────────────────────
+  // Creates booking, shows a 4-second broadcast animation, then sends user
+  // to /home. Jinx responses come in async — user gets notified via the
+  // Jinxes tab dot + a toast. No waiting on this screen.
   const handleSearch = async () => {
     const searchBudget = rewardMode && activeReward
       ? Math.max(activeReward.max_hourly_rate, budgetNum || activeReward.max_hourly_rate)
@@ -131,20 +110,10 @@ export default function FindPage() {
 
     setError('')
     setStep('searching')
-    setSearchProgress(0)
-    setSearchMsgIdx(0)
+    setBroadcastProgress(0)
+    setBroadcastMsgIdx(0)
 
-    // Animate progress bar
-    progressRef.current = setInterval(() => {
-      setSearchProgress(p => Math.min(p + 1.2, 90))
-    }, 150) as unknown as NodeJS.Timeout
-
-    // Cycle messages
-    msgRef.current = setInterval(() => {
-      setSearchMsgIdx(i => Math.min(i + 1, SEARCH_MESSAGES.length - 1))
-    }, 3000) as unknown as NodeJS.Timeout
-
-    // Create booking
+    // Create booking first
     const { data: booking, error: bookingError } = await supabase
       .from('bookings')
       .insert({
@@ -170,7 +139,6 @@ export default function FindPage() {
       .single()
 
     if (bookingError || !booking) {
-      clearSearch()
       setStep('budget')
       setError('Something went wrong. Try again.')
       return
@@ -178,117 +146,39 @@ export default function FindPage() {
 
     setCurrentBookingId(booking.id)
 
-    // Subscribe to booking_responses for this booking
-    channelRef.current = supabase
-      .channel(`find-responses-${booking.id}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'booking_responses',
-        filter: `booking_id=eq.${booking.id}`,
-      }, () => {
-        // New response received — check if we have enough to show results
-        checkAndShowResults(booking.id, searchBudget)
-      })
-      .subscribe()
+    // Animate progress to 100% over ~4 seconds, cycling through messages
+    const DURATION = 4000
+    const TICK = 80
+    const steps = DURATION / TICK
+    let tick = 0
 
-    // Timeout: 3 minutes then check whatever we have
-    timeoutRef.current = setTimeout(() => {
-      checkAndShowResults(booking.id, searchBudget, true)
-    }, 3 * 60 * 1000) as unknown as NodeJS.Timeout
-  }
+    progressRef.current = setInterval(() => {
+      tick++
+      const pct = Math.min((tick / steps) * 100, 100)
+      setBroadcastProgress(pct)
 
-  const checkAndShowResults = async (bookingId: string, searchBudget: number, isTimeout = false) => {
-    const { data: responses } = await supabase
-      .from('booking_responses')
-      .select(`
-        id, jinx_id,
-        users!booking_responses_jinx_id_fkey (
-          id, username, full_name, avatar_url
-        ),
-        jinx_profiles (
-          average_rating, total_jinxes, is_premium, min_hourly_rate, operating_area
-        )
-      `)
-      .eq('booking_id', bookingId)
-      .eq('status', 'accepted')
-      .limit(4)
+      // Cycle message every quarter of the duration
+      const msgIdx = Math.min(Math.floor(tick / (steps / BROADCAST_MESSAGES.length)), BROADCAST_MESSAGES.length - 1)
+      setBroadcastMsgIdx(msgIdx)
 
-    clearSearch()
-
-    if (!responses || responses.length === 0) {
-      // No matches — give advice
-      if (isTimeout) {
-        setNoMatchAdvice(
-          searchBudget < 15000
-            ? `No Jinxes available at ₦${searchBudget.toLocaleString()}/hr right now. Try topping up to ₦${(searchBudget + 5000).toLocaleString()}+.`
-            : 'No Jinxes matched at the moment. Try again in a few minutes or broaden your filters.'
-        )
+      if (pct >= 100) {
+        clearInterval(progressRef.current!)
+        // Brief pause at 100% so user reads "Request sent!" then navigate home
+        setTimeout(() => {
+          router.replace('/home')
+        }, 600)
       }
-      setMatches([])
-      setStep('results')
-      return
-    }
-
-    const jinxList: MatchedJinx[] = (responses as Record<string, unknown>[]).map(r => {
-      const user = r.users as Record<string, unknown>
-      const jp = r.jinx_profiles as Record<string, unknown>
-      const rate = (jp?.min_hourly_rate as number) || searchBudget
-      const fare = Math.round(500 + Math.random() * 2000)
-      return {
-        id: r.jinx_id as string,
-        username: user.username as string,
-        full_name: user.full_name as string | null,
-        avatar_url: user.avatar_url as string | null,
-        average_rating: jp?.average_rating as number | null,
-        total_jinxes: jp?.total_jinxes as number | null,
-        is_premium: (jp?.is_premium as boolean) ?? false,
-        operating_area: jp?.operating_area as string | null,
-        agreed_rate: rate,
-        transport_fare: fare,
-        total_cost: Math.round(rate * getDurationHours(duration) + fare),
-      }
-    })
-
-    setSearchProgress(100)
-    setMatches(jinxList)
-    setNoMatchAdvice('')
-    setStep('results')
-  }
-
-  const clearSearch = () => {
-    channelRef.current?.unsubscribe()
-    if (progressRef.current) clearInterval(progressRef.current)
-    if (msgRef.current) clearInterval(msgRef.current)
-    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    }, TICK) as unknown as NodeJS.Timeout
   }
 
   const handleCancelSearch = async () => {
-    clearSearch()
+    if (progressRef.current) clearInterval(progressRef.current)
+    if (msgRef.current) clearInterval(msgRef.current)
     if (currentBookingId) {
       await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', currentBookingId)
     }
     setStep('budget')
-    setSearchProgress(0)
-  }
-
-  const handleConfirm = async () => {
-    if (!selected || !currentBookingId) return
-    setConfirming(true)
-    const jinx = matches.find(m => m.id === selected)!
-    const { error } = await supabase
-      .from('bookings')
-      .update({
-        jinx_id: selected,
-        agreed_rate: jinx.agreed_rate,
-        transport_fare: jinx.transport_fare,
-        total_charged: jinx.total_cost,
-        platform_commission: jinx.agreed_rate * 0.12,
-        status: 'pending_payment',
-      })
-      .eq('id', currentBookingId)
-    if (!error) router.push(`/find/payment?booking=${currentBookingId}`)
-    setConfirming(false)
+    setBroadcastProgress(0)
   }
 
   const daysLeft = activeReward
@@ -296,252 +186,109 @@ export default function FindPage() {
 
   // ─── Render ────────────────────────────────────────────────────────────────
 
-  // SEARCHING screen — fullscreen, user cannot leave
+  // BROADCAST screen — fullscreen, auto-advances to home after ~4s
   if (step === 'searching') {
+    const isDone = broadcastProgress >= 100
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center"
         style={{ background: 'linear-gradient(160deg, #0D0518 0%, #0a0a14 100%)', zIndex: 100 }}>
 
-        {/* Radar rings */}
+        {/* Radar rings — broadcasting outward */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          {[1, 2, 3, 4].map(i => (
+          {[1, 2, 3, 4, 5].map(i => (
             <div key={i} className="absolute rounded-full border" style={{
-              width: `${i * 22}vw`, height: `${i * 22}vw`,
-              maxWidth: `${i * 110}px`, maxHeight: `${i * 110}px`,
-              borderColor: `rgba(147,51,234,${0.18 - i * 0.03})`,
-              animation: `radar-pulse 2.5s ease-out ${i * 0.5}s infinite`,
+              width: `${i * 20}vw`, height: `${i * 20}vw`,
+              maxWidth: `${i * 100}px`, maxHeight: `${i * 100}px`,
+              borderColor: `rgba(255,45,107,${0.2 - i * 0.03})`,
+              animation: `radar-pulse 3s ease-out ${i * 0.6}s infinite`,
             }} />
           ))}
         </div>
 
-        {/* Pulsing icon */}
+        {/* Central icon */}
         <div className="relative mb-8 z-10">
           <div className="w-20 h-20 rounded-2xl flex items-center justify-center" style={{
-            background: 'linear-gradient(135deg, rgba(147,51,234,0.3), rgba(107,33,168,0.2))',
-            border: '1.5px solid rgba(147,51,234,0.4)',
-            boxShadow: '0 0 40px rgba(147,51,234,0.3)',
-            animation: 'glow-pulse 2s ease-in-out infinite',
+            background: isDone
+              ? 'linear-gradient(135deg, rgba(0,217,126,0.25), rgba(0,180,100,0.15))'
+              : 'linear-gradient(135deg, rgba(255,45,107,0.25), rgba(180,20,60,0.15))',
+            border: `1.5px solid ${isDone ? 'rgba(0,217,126,0.5)' : 'rgba(255,45,107,0.4)'}`,
+            boxShadow: isDone
+              ? '0 0 40px rgba(0,217,126,0.3)'
+              : '0 0 40px rgba(255,45,107,0.3)',
+            transition: 'all 400ms ease',
+            animation: isDone ? 'none' : 'glow-pulse 2s ease-in-out infinite',
           }}>
-            <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-              <path d="M18 32S4 23 4 13a8 8 0 0116 0 8 8 0 0116 0C36 23 18 32 18 32z"
-                fill="rgba(147,51,234,0.6)" stroke="rgba(147,51,234,0.9)" strokeWidth="1.5" />
-            </svg>
+            {isDone ? (
+              // Checkmark when done
+              <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+                <path d="M6 16l7 7 13-13" stroke="#00D97E" strokeWidth="2.5"
+                  strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            ) : (
+              // Broadcast / signal icon
+              <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+                <circle cx="18" cy="20" r="4" fill="rgba(255,45,107,0.9)" />
+                <path d="M9 11C11.8 8.2 15.2 6.5 18 6.5C20.8 6.5 24.2 8.2 27 11"
+                  stroke="rgba(255,45,107,0.6)" strokeWidth="2" strokeLinecap="round" fill="none" />
+                <path d="M5 7C9 3 13.5 1 18 1C22.5 1 27 3 31 7"
+                  stroke="rgba(255,45,107,0.3)" strokeWidth="2" strokeLinecap="round" fill="none" />
+              </svg>
+            )}
           </div>
         </div>
 
         {/* Progress bar */}
         <div className="w-56 h-1 rounded-full mb-3 overflow-hidden z-10"
           style={{ background: 'rgba(255,255,255,0.08)' }}>
-          <div className="h-full rounded-full transition-all duration-300"
-            style={{ width: `${searchProgress}%`, background: 'linear-gradient(90deg, #6B21A8, #9333EA)' }} />
+          <div className="h-full rounded-full"
+            style={{
+              width: `${broadcastProgress}%`,
+              background: isDone
+                ? 'linear-gradient(90deg, #00D97E, #00B864)'
+                : 'linear-gradient(90deg, #C41751, #FF2D6B)',
+              transition: 'width 80ms linear, background 400ms ease',
+            }} />
         </div>
 
-        <p className="text-xs mb-6 font-medium z-10"
-          style={{ color: 'rgba(147,51,234,0.7)', fontFamily: 'var(--font-body)', letterSpacing: '0.06em' }}>
-          {Math.round(searchProgress)}%
-        </p>
-
-        <h2 className="font-display text-xl text-center mb-2 px-10 z-10"
-          style={{ color: 'rgba(255,255,255,0.9)', lineHeight: 1.35 }}>
-          {SEARCH_MESSAGES[searchMsgIdx]}
+        {/* Message */}
+        <h2 className="font-display text-xl text-center mb-3 px-10 z-10"
+          style={{
+            color: isDone ? 'rgba(0,217,126,0.9)' : 'rgba(255,255,255,0.9)',
+            lineHeight: 1.35, transition: 'color 400ms ease',
+          }}>
+          {BROADCAST_MESSAGES[broadcastMsgIdx]}
         </h2>
 
-        <p className="text-xs text-center mt-8 px-10 z-10"
-          style={{ color: 'rgba(255,255,255,0.2)', fontFamily: 'var(--font-body)' }}>
-          Please keep this screen open while we find your Jinx
+        {/* Subtitle */}
+        <p className="text-xs text-center px-10 z-10"
+          style={{ color: 'rgba(255,255,255,0.25)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
+          {isDone
+            ? 'Taking you back to home...'
+            : 'You\'ll get a notification when a Jinx responds.\nFeel free to browse while you wait.'}
         </p>
 
-        <button onClick={handleCancelSearch}
-          className="absolute bottom-12 text-sm z-10"
-          style={{ color: 'rgba(255,255,255,0.3)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
-          Cancel search
-        </button>
+        {/* Cancel — only visible before done */}
+        {!isDone && (
+          <button onClick={handleCancelSearch}
+            className="absolute bottom-16 text-sm z-10"
+            style={{
+              color: 'rgba(255,255,255,0.25)', background: 'none',
+              border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)',
+            }}>
+            Cancel request
+          </button>
+        )}
 
         <style jsx>{`
           @keyframes glow-pulse {
-            0%, 100% { box-shadow: 0 0 40px rgba(147,51,234,0.3); }
-            50%       { box-shadow: 0 0 64px rgba(147,51,234,0.55); }
+            0%, 100% { box-shadow: 0 0 40px rgba(255,45,107,0.3); }
+            50%       { box-shadow: 0 0 64px rgba(255,45,107,0.55); }
           }
           @keyframes radar-pulse {
-            0%   { transform: scale(0.6); opacity: 0.8; }
-            100% { transform: scale(2.4); opacity: 0; }
+            0%   { transform: scale(0.5); opacity: 0.9; }
+            100% { transform: scale(2.8); opacity: 0; }
           }
         `}</style>
-      </div>
-    )
-  }
-
-  // RESULTS screen
-  if (step === 'results') {
-    return (
-      <div className="min-h-dvh flex flex-col" style={{ background: 'var(--bg-base)' }}>
-        <div className="absolute inset-0 pointer-events-none" style={{
-          background: 'radial-gradient(ellipse 60% 30% at 50% 0%, rgba(255,45,107,0.05) 0%, transparent 60%)',
-        }} />
-
-        <div className="relative px-5 pt-14 pb-4">
-          <button onClick={() => { setStep('budget'); setMatches([]); setSelected(null) }}
-            className="mb-6 flex items-center gap-2"
-            style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}>
-            <svg width="20" height="20" viewBox="0 0 20 20" fill="none">
-              <path d="M12 4L6 10L12 16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-          </button>
-
-          {matches.length > 0 ? (
-            <>
-              <p className="text-xs font-medium uppercase tracking-widest mb-1"
-                style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}>
-                {matches.length} Match{matches.length !== 1 ? 'es' : ''} Found
-              </p>
-              <h1 className="font-display text-3xl mb-1" style={{ color: 'var(--text-primary)' }}>
-                Time to choose.
-              </h1>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
-                Tap a profile to select, then confirm your pick.
-              </p>
-            </>
-          ) : (
-            <>
-              <h1 className="font-display text-2xl mb-2" style={{ color: 'var(--text-primary)' }}>
-                No matches yet.
-              </h1>
-              <p className="text-sm" style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
-                {noMatchAdvice || 'No Jinxes matched your preferences right now.'}
-              </p>
-            </>
-          )}
-        </div>
-
-        <div className="relative flex-1 px-5 pb-32 overflow-y-auto">
-          {matches.length === 0 ? (
-            <div className="flex flex-col gap-3 mt-4">
-              <button onClick={() => { setBudget(''); setStep('budget') }}
-                className="w-full py-4 rounded-full text-base font-semibold text-white"
-                style={{ background: 'var(--pink)', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)', boxShadow: '0 4px 20px rgba(255,45,107,0.35)' }}>
-                Try a higher budget
-              </button>
-              <button onClick={() => { setFilterSheetOpen(true) }}
-                className="w-full py-4 rounded-full text-base font-medium"
-                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)', color: 'var(--text-secondary)', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
-                Change my preferences
-              </button>
-              <button onClick={() => router.push('/home')}
-                className="text-sm text-center mt-2"
-                style={{ color: 'var(--text-muted)', background: 'none', border: 'none', cursor: 'pointer', fontFamily: 'var(--font-body)' }}>
-                Back to home
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {matches.map(jinx => {
-                const isSel = selected === jinx.id
-                return (
-                  <button key={jinx.id}
-                    onClick={() => setSelected(isSel ? null : jinx.id)}
-                    className="w-full text-left p-4 rounded-2xl transition-all duration-200"
-                    style={{
-                      background: isSel ? 'rgba(255,45,107,0.06)' : 'var(--bg-surface)',
-                      border: `1.5px solid ${isSel ? 'var(--pink)' : 'var(--border)'}`,
-                      boxShadow: isSel ? '0 0 0 3px rgba(255,45,107,0.1)' : 'none',
-                    }}>
-                    <div className="flex items-center gap-3">
-                      {/* Avatar */}
-                      <div className="relative flex-shrink-0">
-                        <Avatar
-                          src={jinx.avatar_url}
-                          name={jinx.full_name || jinx.username}
-                          size={56}
-                        />
-                        {jinx.is_premium && (
-                          <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center"
-                            style={{ background: '#FFB800' }}>
-                            <span style={{ fontSize: 10 }}>★</span>
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Info */}
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold truncate"
-                          style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-                          {jinx.full_name || jinx.username}
-                        </p>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          {jinx.average_rating && (
-                            <span className="text-xs" style={{ color: '#FFB800', fontFamily: 'var(--font-body)' }}>
-                              ★ {jinx.average_rating.toFixed(1)}
-                            </span>
-                          )}
-                          {jinx.total_jinxes != null && (
-                            <span className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                              {jinx.total_jinxes} Jinxes
-                            </span>
-                          )}
-                          {jinx.operating_area && (
-                            <span className="text-xs truncate" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                              · {jinx.operating_area}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Price */}
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-sm font-semibold"
-                          style={{ color: isSel ? 'var(--pink)' : 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-                          {formatCurrency(jinx.total_cost)}
-                        </p>
-                        <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                          incl. transport
-                        </p>
-                      </div>
-
-                      {/* Checkmark */}
-                      {isSel && (
-                        <div className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0"
-                          style={{ background: 'var(--pink)' }}>
-                          <svg width="12" height="10" viewBox="0 0 12 10" fill="none">
-                            <path d="M1 5L4.5 8.5L11 1" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-                          </svg>
-                        </div>
-                      )}
-                    </div>
-                  </button>
-                )
-              })}
-            </div>
-          )}
-        </div>
-
-        {/* Confirm CTA */}
-        {selected && (
-          <div className="fixed bottom-0 left-0 right-0 max-w-app mx-auto px-5 pb-8 pt-4"
-            style={{ background: 'linear-gradient(to top, var(--bg-base) 70%, transparent)' }}>
-            <div className="flex items-center justify-between mb-3 px-4 py-2 rounded-xl"
-              style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border)' }}>
-              <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                Service + transport
-              </p>
-              <p className="text-sm font-semibold" style={{ color: 'var(--pink)', fontFamily: 'var(--font-body)' }}>
-                {formatCurrency(matches.find(m => m.id === selected)?.total_cost ?? 0)}
-              </p>
-            </div>
-            <button onClick={handleConfirm} disabled={confirming}
-              className="w-full py-4 rounded-full text-base font-semibold text-white"
-              style={{
-                background: 'var(--pink)', boxShadow: '0 4px 20px rgba(255,45,107,0.4)',
-                border: 'none', cursor: confirming ? 'not-allowed' : 'pointer',
-                fontFamily: 'var(--font-body)', opacity: confirming ? 0.7 : 1,
-              }}>
-              {confirming ? 'Confirming...' : 'Proceed to payment'}
-            </button>
-          </div>
-        )}
-
-        <FilterSheet open={filterSheetOpen} onClose={() => setFilterSheetOpen(false)}
-          values={filters} onChange={setFilters}
-          onApply={() => { setStep('budget') }} />
       </div>
     )
   }
