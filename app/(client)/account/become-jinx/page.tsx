@@ -1,7 +1,4 @@
 // app/(client)/account/become-jinx/page.tsx
-// Multi-step Jinx onboarding flow. Collects all NOT NULL jinx_profiles fields
-// before inserting the row. On completion: inserts jinx_profiles, updates
-// users.role = 'jinx', users.current_mode = 'jinx', redirects to /jinx/dashboard.
 'use client'
 
 import { useState } from 'react'
@@ -59,8 +56,9 @@ export default function BecomeJinxPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  // Form state
-  const [gender, setGender] = useState<string>(profile?.gender ?? '')
+  // Gender is locked to whatever was set at sign-up — never editable here
+  const lockedGender = profile?.gender ?? ''
+
   const [orientation, setOrientation] = useState('')
   const [ethnicity, setEthnicity] = useState('')
   const [bodyType, setBodyType] = useState('')
@@ -85,24 +83,32 @@ export default function BecomeJinxPage() {
   }
 
   const handleComplete = async () => {
-    if (!profile?.id) return
+    if (!profile?.id) {
+      setError('Session could not be loaded. Please refresh and try again.')
+      return
+    }
+
     const rateNum = parseInt(minRate.replace(/,/g, ''))
-    if (!rateNum || rateNum < 1000) { setError('Minimum rate must be at least ₦1,000'); return }
+    if (!rateNum || rateNum < 1000) {
+      setError('Minimum rate must be at least ₦1,000')
+      return
+    }
 
     setLoading(true)
     setError('')
 
     try {
-      // Check if jinx_profile already exists for this user
-      const { data: existing } = await supabase
+      const { data: existing, error: checkError } = await supabase
         .from('jinx_profiles')
         .select('id')
         .eq('user_id', profile.id)
         .maybeSingle()
 
+      if (checkError) throw checkError
+
       const profilePayload = {
         user_id: profile.id,
-        gender: gender as 'male' | 'female',
+        gender: lockedGender as 'male' | 'female',
         orientation,
         skin_tone: skinTone,
         body_type: bodyType,
@@ -117,49 +123,47 @@ export default function BecomeJinxPage() {
       }
 
       if (existing) {
-        // Row exists — update it
         const { error: updateError } = await supabase
           .from('jinx_profiles')
           .update(profilePayload)
           .eq('user_id', profile.id)
-
         if (updateError) throw updateError
       } else {
-        // No row yet — insert fresh
         const { error: insertError } = await supabase
           .from('jinx_profiles')
           .insert(profilePayload)
-
         if (insertError) throw insertError
       }
 
-      // Update user: role → jinx, current_mode → jinx
       const { error: userError } = await supabase
         .from('users')
         .update({ role: 'jinx', current_mode: 'jinx' })
         .eq('id', profile.id)
-
       if (userError) throw userError
 
-      // Create client_profiles if it doesn't exist yet
       await supabase
         .from('client_profiles')
         .upsert({ user_id: profile.id }, { onConflict: 'user_id' })
 
+      // Refresh profile so layout guard sees role=jinx, current_mode=jinx
       await refresh()
-      setStep('done')
 
-      // Brief pause then go to Jinx dashboard
-      setTimeout(() => router.replace('/jinx/dashboard'), 1800)
+      setStep('done')
+      // Small delay to show the done screen, then push to jinx dashboard
+      setTimeout(() => router.push('/jinx/dashboard'), 1800)
+
     } catch (err: unknown) {
-      console.error('[become-jinx] handleComplete error:', err)
-      const message = err instanceof Error ? err.message : JSON.stringify(err)
+      console.error('[become-jinx] error:', err)
+      const message =
+        err instanceof Error ? err.message
+        : (typeof err === 'object' && err !== null && 'message' in err)
+          ? String((err as { message: unknown }).message)
+          : JSON.stringify(err)
       setError(message || 'Something went wrong. Try again.')
       setLoading(false)
     }
   }
 
-  // Shared styles
   const primaryBtn = (disabled = false): React.CSSProperties => ({
     width: '100%', padding: '16px',
     background: disabled ? 'var(--bg-elevated)' : '#9333EA',
@@ -194,7 +198,6 @@ export default function BecomeJinxPage() {
     </div>
   )
 
-  // Done screen
   if (step === 'done') {
     return (
       <div className="fixed inset-0 flex flex-col items-center justify-center"
@@ -205,8 +208,7 @@ export default function BecomeJinxPage() {
             <path d="M6 18l8 8 16-16" stroke="#9333EA" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"/>
           </svg>
         </div>
-        <h1 className="font-display text-3xl mb-3 text-center px-8"
-          style={{ color: 'white', lineHeight: 1.3 }}>
+        <h1 className="font-display text-3xl mb-3 text-center px-8" style={{ color: 'white', lineHeight: 1.3 }}>
           Welcome to<br/>
           <span style={{ color: '#9333EA', fontStyle: 'italic' }}>Jinx Mode</span>
         </h1>
@@ -224,7 +226,6 @@ export default function BecomeJinxPage() {
         background: 'radial-gradient(ellipse 80% 40% at 50% 0%, rgba(147,51,234,0.06) 0%, transparent 60%)',
       }} />
 
-      {/* Progress bar — purple */}
       <div style={{ height: 2, background: 'var(--bg-elevated)', flexShrink: 0 }}>
         <div style={{
           height: '100%', width: `${progress}%`,
@@ -233,7 +234,6 @@ export default function BecomeJinxPage() {
         }} />
       </div>
 
-      {/* Header */}
       <div className="relative px-6 pt-12">
         <button onClick={goBack} className="mb-6 flex items-center"
           style={{ color: 'var(--text-secondary)', background: 'none', border: 'none', cursor: 'pointer' }}>
@@ -242,60 +242,56 @@ export default function BecomeJinxPage() {
           </svg>
         </button>
 
-        <div className="mb-3">
-          <p className="text-xs font-medium uppercase tracking-widest mb-2"
-            style={{ color: '#9333EA', fontFamily: 'var(--font-body)' }}>
-            Step {stepIndex + 1} of {STEPS.length}
-          </p>
-        </div>
+        <p className="text-xs font-medium uppercase tracking-widest mb-3"
+          style={{ color: '#9333EA', fontFamily: 'var(--font-body)' }}>
+          Step {stepIndex + 1} of {STEPS.length}
+        </p>
 
-        {step === 'gender' && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your gender</h1>}
+        {step === 'gender'      && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your gender</h1>}
         {step === 'orientation' && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your orientation</h1>}
-        {step === 'ethnicity' && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your ethnicity</h1>}
-        {step === 'body_type' && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your body type</h1>}
-        {step === 'skin_tone' && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your skin tone</h1>}
+        {step === 'ethnicity'   && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your ethnicity</h1>}
+        {step === 'body_type'   && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your body type</h1>}
+        {step === 'skin_tone'   && <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your skin tone</h1>}
         {step === 'bio' && <>
           <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your bio</h1>
-          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>
-            Tell clients a little about yourself
-          </p>
+          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>Tell clients a little about yourself</p>
         </>}
         {step === 'area' && <>
           <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Operating area</h1>
-          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>
-            Where are you based? e.g. Lekki, Lagos
-          </p>
+          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>Where are you based? e.g. Lekki, Lagos</p>
         </>}
         {step === 'rate' && <>
           <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>Your hourly rate</h1>
-          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>
-            Minimum you'll accept per hour
-          </p>
+          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>Minimum you'll accept per hour</p>
         </>}
         {step === 'adult' && <>
           <h1 className="font-display text-3xl mb-2" style={{ color: 'var(--text-primary)' }}>18+ services</h1>
-          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>
-            Are you open to adult bookings?
-          </p>
+          <p style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)', fontSize: 14 }}>Are you open to adult bookings?</p>
         </>}
       </div>
 
-      {/* Content */}
       <div className="relative flex-1 px-6 pb-12 mt-6 space-y-3">
 
-        {/* Gender */}
+        {/* Gender — pre-filled and locked */}
         {step === 'gender' && (
           <>
-            {['male', 'female'].map(g => (
-              <button key={g} onClick={() => setGender(g)} style={chipBtn(gender === g)}>
-                <span className="capitalize">{g}</span>
-                {gender === g && checkmark}
-              </button>
-            ))}
-            <button onClick={goNext} disabled={!gender}
-              style={primaryBtn(!gender)}>
-              Continue
-            </button>
+            {['male', 'female'].map(g => {
+              const isSelected = lockedGender === g
+              return (
+                <div key={g} style={{
+                  ...chipBtn(isSelected),
+                  cursor: 'default',
+                  opacity: isSelected ? 1 : 0.35,
+                }}>
+                  <span className="capitalize">{g}</span>
+                  {isSelected && checkmark}
+                </div>
+              )
+            })}
+            <p style={{ fontSize: 12, color: 'var(--text-muted)', fontFamily: 'var(--font-body)', textAlign: 'center' }}>
+              Set during sign-up
+            </p>
+            <button onClick={goNext} style={primaryBtn(false)}>Continue</button>
           </>
         )}
 
@@ -308,9 +304,7 @@ export default function BecomeJinxPage() {
                 {orientation === o.value && checkmark}
               </button>
             ))}
-            <button onClick={goNext} disabled={!orientation} style={primaryBtn(!orientation)}>
-              Continue
-            </button>
+            <button onClick={goNext} disabled={!orientation} style={primaryBtn(!orientation)}>Continue</button>
           </>
         )}
 
@@ -331,9 +325,7 @@ export default function BecomeJinxPage() {
                 </button>
               ))}
             </div>
-            <button onClick={goNext} disabled={!ethnicity} style={primaryBtn(!ethnicity)}>
-              Continue
-            </button>
+            <button onClick={goNext} disabled={!ethnicity} style={primaryBtn(!ethnicity)}>Continue</button>
           </>
         )}
 
@@ -354,9 +346,7 @@ export default function BecomeJinxPage() {
                 </button>
               ))}
             </div>
-            <button onClick={goNext} disabled={!bodyType} style={primaryBtn(!bodyType)}>
-              Continue
-            </button>
+            <button onClick={goNext} disabled={!bodyType} style={primaryBtn(!bodyType)}>Continue</button>
           </>
         )}
 
@@ -378,15 +368,11 @@ export default function BecomeJinxPage() {
                   <span style={{
                     fontSize: 10, color: skinTone === st.value ? '#9333EA' : 'var(--text-muted)',
                     fontFamily: 'var(--font-body)', textAlign: 'center',
-                  }}>
-                    {st.label}
-                  </span>
+                  }}>{st.label}</span>
                 </button>
               ))}
             </div>
-            <button onClick={goNext} disabled={!skinTone} style={primaryBtn(!skinTone)}>
-              Continue
-            </button>
+            <button onClick={goNext} disabled={!skinTone} style={primaryBtn(!skinTone)}>Continue</button>
           </>
         )}
 
@@ -421,11 +407,9 @@ export default function BecomeJinxPage() {
         {/* Operating area */}
         {step === 'area' && (
           <>
-            <input type="text"
-              value={operatingArea}
+            <input type="text" value={operatingArea}
               onChange={e => setOperatingArea(e.target.value)}
-              placeholder="e.g. Lekki, Lagos"
-              autoFocus
+              placeholder="e.g. Lekki, Lagos" autoFocus
               style={{
                 width: '100%', padding: '14px 16px',
                 background: 'var(--bg-input)', border: '1.5px solid var(--border)',
@@ -446,15 +430,13 @@ export default function BecomeJinxPage() {
                 position: 'absolute', left: 16, top: '50%', transform: 'translateY(-50%)',
                 color: 'var(--text-muted)', fontFamily: 'var(--font-body)', fontSize: 15,
               }}>₦</span>
-              <input type="tel" inputMode="numeric"
-                value={minRate}
+              <input type="tel" inputMode="numeric" value={minRate}
                 onChange={e => {
                   const raw = e.target.value.replace(/[^0-9]/g, '')
                   setMinRate(raw ? parseInt(raw).toLocaleString() : '')
                   setError('')
                 }}
-                placeholder="e.g. 25,000"
-                autoFocus
+                placeholder="e.g. 25,000" autoFocus
                 style={{
                   width: '100%', padding: '14px 16px 14px 28px',
                   background: 'var(--bg-input)', border: '1.5px solid var(--border)',
@@ -485,8 +467,7 @@ export default function BecomeJinxPage() {
                     style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
                     Enable 18+ bookings
                   </p>
-                  <p className="text-xs"
-                    style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
                     Clients looking for adult companions will find you
                   </p>
                 </div>
@@ -500,8 +481,7 @@ export default function BecomeJinxPage() {
 
             <div className="p-3 rounded-xl"
               style={{ background: 'rgba(147,51,234,0.06)', border: '1px solid rgba(147,51,234,0.15)' }}>
-              <p className="text-xs"
-                style={{ color: 'rgba(147,51,234,0.7)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
+              <p className="text-xs" style={{ color: 'rgba(147,51,234,0.7)', fontFamily: 'var(--font-body)', lineHeight: 1.6 }}>
                 You can change this anytime from your Jinx settings. All bookings are subject to Jinxy's terms of service.
               </p>
             </div>
@@ -515,8 +495,7 @@ export default function BecomeJinxPage() {
               </div>
             )}
 
-            <button onClick={handleComplete} disabled={loading}
-              style={primaryBtn(loading)}>
+            <button onClick={handleComplete} disabled={loading} style={primaryBtn(loading)}>
               {loading
                 ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
                     <Spinner /> Setting up your profile...
