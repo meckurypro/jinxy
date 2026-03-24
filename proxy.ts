@@ -59,7 +59,7 @@ export async function proxy(request: NextRequest) {
     {
       cookies: {
         getAll: () => request.cookies.getAll(),
-        setAll: (cookiesToSet) => {
+        setAll: (cookiesToSet: { name: string; value: string; options?: object }[]) => {
           // Write refreshed cookies into the request (for Server Components)
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
