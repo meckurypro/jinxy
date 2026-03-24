@@ -135,11 +135,11 @@ export default function BecomeJinxPage() {
         if (insertError) throw insertError
       }
 
-      const { error: userError } = await supabase
-        .from('users')
-        .update({ role: 'jinx', current_mode: 'jinx' })
-        .eq('id', profile.id)
-      if (userError) throw userError
+    const { error: userError } = await supabase
+  .from('users')
+  .update({ role: 'vendor', current_mode: 'vendor' })
+  .eq('id', profile.id)
+if (userError) throw userError
 
       await supabase
         .from('client_profiles')
