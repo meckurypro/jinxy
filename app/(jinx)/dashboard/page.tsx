@@ -1,32 +1,51 @@
+// app/(jinx)/dashboard/page.tsx
 'use client'
 
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/lib/hooks/useUser'
 import { useSupabase } from '@/lib/hooks/useSupabase'
-import { StatusToggle } from '@/components/jinx/StatusToggle'
 import { Avatar } from '@/components/shared/Avatar'
-import { formatCurrency, formatRelativeTime } from '@/lib/utils'
+import { formatCurrency } from '@/lib/utils'
 
-interface RecentBooking {
-  id: string
-  status: string
-  duration_tier: string
-  vendor_payout: number
-  created_at: string
-  client: { username: string; full_name: string | null; avatar_url: string | null }
+interface JinxProfile {
+  is_active: boolean
+  status: 'online' | 'offline' | 'busy'
+  min_hourly_rate: number
+  average_rating: number
+  total_jinxes: number
+  kyc_status: string
+  operating_area: string | null
+  is_premium: boolean
+}
+
+interface DashboardStats {
+  pending_requests: number
+  active_session: boolean
+  earnings_this_month: number
+  total_earnings: number
+}
+
+function Shimmer({ width, height, rounded = 8 }: { width: string | number; height: number; rounded?: number }) {
+  return (
+    <div style={{
+      width, height, borderRadius: rounded,
+      background: 'rgba(147,51,234,0.08)',
+      animation: 'skeleton-pulse 1.5s ease-in-out infinite',
+    }} />
+  )
 }
 
 export default function JinxDashboardPage() {
   const router = useRouter()
-  const { profile } = useUser()
+  const { profile, refresh } = useUser()
   const supabase = useSupabase()
 
-  const [jinxProfile, setJinxProfile] = useState<Record<string, unknown> | null>(null)
-  const [recentBookings, setRecentBookings] = useState<RecentBooking[]>([])
-  const [pendingRequests, setPendingRequests] = useState(0)
-  const [monthlyEarnings, setMonthlyEarnings] = useState(0)
+  const [jinxProfile, setJinxProfile] = useState<JinxProfile | null>(null)
+  const [stats, setStats] = useState<DashboardStats | null>(null)
   const [loading, setLoading] = useState(true)
+  const [togglingStatus, setTogglingStatus] = useState(false)
+  const [switchingMode, setSwitchingMode] = useState(false)
 
   useEffect(() => {
     if (profile?.id) fetchData()
@@ -34,246 +53,262 @@ export default function JinxDashboardPage() {
 
   const fetchData = async () => {
     if (!profile?.id) return
+    setLoading(true)
 
-    // Fetch jinx profile
-    const { data: jp } = await supabase
-      .from('jinx_profiles')
-      .select('*')
-      .eq('user_id', profile.id)
-      .single()
+    const [jpRes, pendingRes, earningsRes] = await Promise.all([
+      supabase.from('jinx_profiles').select(
+        'is_active, status, min_hourly_rate, average_rating, total_jinxes, kyc_status, operating_area, is_premium'
+      ).eq('user_id', profile.id).maybeSingle(),
 
-    setJinxProfile(jp)
+      supabase.from('booking_responses').select('*', { count: 'exact', head: true })
+        .eq('jinx_id', profile.id).eq('status', 'notified'),
 
-    // Fetch pending requests
-    const { count } = await supabase
-      .from('booking_responses')
-      .select('*', { count: 'exact', head: true })
-      .eq('jinx_id', profile.id)
-      .eq('status', 'notified')
+      supabase.from('payments').select('amount')
+        .eq('payee_id', profile.id)
+        .eq('payment_status', 'completed')
+        .gte('created_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()),
+    ])
 
-    setPendingRequests(count ?? 0)
+    if (jpRes.data) setJinxProfile(jpRes.data as JinxProfile)
 
-    // Fetch recent bookings
-    const { data: bookings } = await supabase
-      .from('bookings')
-      .select(`
-        id, status, duration_tier, vendor_payout, created_at,
-        client:users!bookings_client_id_fkey (
-          username, full_name, avatar_url
-        )
-      `)
-      .eq('jinx_id', profile.id)
-      .in('status', ['completed', 'active', 'confirmed'])
-      .order('created_at', { ascending: false })
-      .limit(5)
-
-    if (bookings) setRecentBookings(bookings as unknown as RecentBooking[])
-
-    // Monthly earnings
-    const startOfMonth = new Date()
-    startOfMonth.setDate(1)
-    startOfMonth.setHours(0, 0, 0, 0)
-
-    const { data: payments } = await supabase
-      .from('payments')
-      .select('amount')
-      .eq('payee_id', profile.id)
-      .eq('transaction_type', 'vendor_payout')
-      .gte('created_at', startOfMonth.toISOString())
-
-    const total = (payments ?? []).reduce((sum, p) => sum + (p.amount ?? 0), 0)
-    setMonthlyEarnings(total)
+    const monthEarnings = (earningsRes.data ?? []).reduce((s: number, p: Record<string, unknown>) => s + (p.amount as number), 0)
+    setStats({
+      pending_requests: pendingRes.count ?? 0,
+      active_session: false,
+      earnings_this_month: monthEarnings,
+      total_earnings: 0,
+    })
 
     setLoading(false)
   }
 
-  const statusValue = (jinxProfile?.status as string ?? 'offline') as
-    'offline' | 'available' | 'busy' | 'unavailable'
+  // Toggle online/offline status
+  const handleToggleStatus = async () => {
+    if (!profile?.id || togglingStatus) return
+    if (jinxProfile?.kyc_status !== 'verified') {
+      // KYC not done — show info (placeholder for now)
+      alert('Complete KYC verification before going online.')
+      return
+    }
+    setTogglingStatus(true)
+    const newStatus = jinxProfile?.status === 'online' ? 'offline' : 'online'
+    const { error } = await supabase
+      .from('jinx_profiles')
+      .update({ status: newStatus, is_active: newStatus === 'online' })
+      .eq('user_id', profile.id)
+    if (!error) {
+      setJinxProfile(prev => prev ? { ...prev, status: newStatus as 'online' | 'offline', is_active: newStatus === 'online' } : prev)
+    }
+    setTogglingStatus(false)
+  }
 
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening'
+  // Switch back to client mode
+  const handleSwitchToClient = async () => {
+    if (!profile?.id || switchingMode) return
+    setSwitchingMode(true)
+    const { error } = await supabase
+      .from('users')
+      .update({ current_mode: 'client' })
+      .eq('id', profile.id)
+    if (!error) {
+      await refresh()
+      router.replace('/home')
+    } else {
+      setSwitchingMode(false)
+    }
+  }
+
+  const isOnline = jinxProfile?.status === 'online'
 
   return (
     <div className="min-h-dvh" style={{ background: 'var(--bg-base)' }}>
-      {/* Background glow — purple for jinx mode */}
-      <div
-        className="absolute inset-0 pointer-events-none"
-        style={{
-          background: 'radial-gradient(ellipse 70% 35% at 50% 0%, rgba(147,51,234,0.08) 0%, transparent 60%)',
-        }}
-      />
+
+      {/* Purple top glow */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        background: 'radial-gradient(ellipse 70% 30% at 50% 0%, rgba(147,51,234,0.08) 0%, transparent 50%)',
+      }} />
 
       {/* Header */}
-      <div className="relative px-5 pt-14 pb-2">
+      <div className="relative px-5 pt-14 pb-4">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <p className="text-xs font-medium uppercase tracking-widest mb-0.5"
-              style={{ color: 'rgba(147,51,234,0.8)', fontFamily: 'var(--font-body)' }}>
-              {greeting}
+            <p className="text-xs font-medium uppercase tracking-widest mb-1"
+              style={{ color: 'rgba(147,51,234,0.7)', fontFamily: 'var(--font-body)' }}>
+              Jinx Mode
             </p>
             <h1 className="font-display text-2xl" style={{ color: 'var(--text-primary)' }}>
-              {profile?.full_name?.split(' ')[0] || profile?.username || 'Jinx'}
+              {loading ? 'Loading...' : `Hey, ${profile?.full_name?.split(' ')[0] || profile?.username}`}
             </h1>
           </div>
           <Avatar
             src={profile?.avatar_url}
             name={profile?.full_name || profile?.username || 'J'}
             size={44}
-            onClick={() => router.push('/account')}
           />
         </div>
 
-        {/* Status toggle */}
-        {profile?.id && (
-          <StatusToggle
-            userId={profile.id}
-            initialStatus={statusValue}
-            onStatusChange={() => fetchData()}
-          />
+        {/* Online toggle card */}
+        <div className="p-4 rounded-2xl mb-4"
+          style={{
+            background: isOnline
+              ? 'linear-gradient(135deg, rgba(0,217,126,0.08), rgba(0,180,100,0.04))'
+              : 'var(--bg-surface)',
+            border: `1.5px solid ${isOnline ? 'rgba(0,217,126,0.25)' : 'var(--border)'}`,
+            transition: 'all 300ms ease',
+          }}>
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-semibold mb-0.5"
+                style={{
+                  color: isOnline ? '#00D97E' : 'var(--text-secondary)',
+                  fontFamily: 'var(--font-body)',
+                  transition: 'color 300ms ease',
+                }}>
+                {loading ? '...' : isOnline ? 'You\'re online' : 'You\'re offline'}
+              </p>
+              <p className="text-xs"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                {isOnline
+                  ? 'Clients can find and book you'
+                  : 'Go online to start receiving bookings'}
+              </p>
+            </div>
+            {loading ? (
+              <Shimmer width={52} height={28} rounded={14} />
+            ) : (
+              <button onClick={handleToggleStatus} disabled={togglingStatus}
+                style={{
+                  width: 52, height: 28, borderRadius: 14,
+                  background: isOnline ? '#00D97E' : 'var(--bg-elevated)',
+                  border: `1px solid ${isOnline ? '#00D97E' : 'var(--border)'}`,
+                  cursor: togglingStatus ? 'not-allowed' : 'pointer',
+                  position: 'relative', transition: 'all 300ms ease',
+                  opacity: togglingStatus ? 0.6 : 1,
+                }}>
+                <div style={{
+                  width: 22, height: 22, borderRadius: '50%', background: 'white',
+                  position: 'absolute', top: 3,
+                  left: isOnline ? 27 : 3,
+                  transition: 'left 300ms ease',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.3)',
+                }} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* KYC pending banner */}
+        {!loading && jinxProfile?.kyc_status !== 'verified' && (
+          <div className="p-3 rounded-xl mb-4 flex items-center gap-3"
+            style={{ background: 'rgba(255,184,0,0.08)', border: '1px solid rgba(255,184,0,0.2)' }}>
+            <span style={{ fontSize: 18, flexShrink: 0 }}>⚠️</span>
+            <div className="flex-1">
+              <p className="text-xs font-medium"
+                style={{ color: '#FFB800', fontFamily: 'var(--font-body)' }}>
+                KYC verification pending
+              </p>
+              <p className="text-xs"
+                style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                Complete verification to go online and receive bookings
+              </p>
+            </div>
+          </div>
         )}
       </div>
 
       {/* Stats row */}
-      <div className="relative px-5 mt-5 grid grid-cols-3 gap-3">
-        {[
-          {
-            label: 'This month',
-            value: formatCurrency(monthlyEarnings),
-            sub: 'Earnings',
-            color: '#9333EA',
-          },
-          {
-            label: 'Total',
-            value: jinxProfile?.total_jinxes?.toString() ?? '0',
-            sub: 'Jinxes',
-            color: 'var(--pink)',
-          },
-          {
-            label: 'Rating',
-            value: (jinxProfile?.average_rating as number) > 0
-              ? (jinxProfile?.average_rating as number).toFixed(1)
-              : '—',
-            sub: '/ 5.0',
-            color: '#FFB800',
-          },
-        ].map(stat => (
-          <div
-            key={stat.label}
-            className="p-3 rounded-2xl text-center"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-          >
-            <p className="text-xs mb-1" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-              {stat.label}
-            </p>
-            <p className="text-base font-semibold" style={{ color: stat.color, fontFamily: 'var(--font-body)' }}>
-              {stat.value}
-            </p>
-            <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-              {stat.sub}
-            </p>
-          </div>
-        ))}
-      </div>
-
-      {/* Pending requests banner */}
-      {pendingRequests > 0 && (
-        <button
-          onClick={() => router.push('/jinx/requests')}
-          className="relative mx-5 mt-4 w-[calc(100%-40px)] p-4 rounded-2xl flex items-center justify-between"
-          style={{
-            background: 'rgba(147,51,234,0.1)',
-            border: '1.5px solid rgba(147,51,234,0.3)',
-          }}
-        >
-          <div className="flex items-center gap-3">
-            <div
-              className="w-8 h-8 rounded-xl flex items-center justify-center"
-              style={{ background: 'rgba(147,51,234,0.2)' }}
-            >
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-                <path d="M8 1l1.5 3h3L10 6l1 3-3-2-3 2 1-3-2.5-2H6.5L8 1z"
-                  fill="#9333EA" />
-              </svg>
-            </div>
-            <div className="text-left">
-              <p className="text-sm font-semibold" style={{ color: '#9333EA', fontFamily: 'var(--font-body)' }}>
-                {pendingRequests} new request{pendingRequests > 1 ? 's' : ''}
-              </p>
-              <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                Tap to view and respond
-              </p>
-            </div>
-          </div>
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path d="M6 4l4 4-4 4" stroke="#9333EA" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      )}
-
-      {/* Recent activity */}
-      <div className="relative px-5 mt-6 pb-6">
-        <p className="text-xs font-medium uppercase tracking-widest mb-3"
-          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-          Recent Jinxes
-        </p>
-
-        {recentBookings.length === 0 ? (
-          <div
-            className="p-8 rounded-2xl text-center"
-            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-          >
-            <p className="font-display text-lg mb-1" style={{ color: 'var(--text-secondary)' }}>
-              No Jinxes yet.
-            </p>
-            <p className="text-sm" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-              Go online to start receiving requests.
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {recentBookings.map(booking => (
-              <button
-                key={booking.id}
-                onClick={() => router.push(`/jinx/requests/${booking.id}`)}
-                className="w-full flex items-center gap-3 p-3 rounded-2xl text-left"
-                style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)' }}
-              >
-                <Avatar
-                  src={booking.client?.avatar_url}
-                  name={booking.client?.full_name || booking.client?.username || 'C'}
-                  size={44}
-                />
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate"
-                    style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-                    {booking.client?.full_name || booking.client?.username}
+      <div className="px-5 mb-5">
+        <div className="grid grid-cols-2 gap-3">
+          {[
+            {
+              label: 'Pending requests',
+              value: loading ? null : stats?.pending_requests ?? 0,
+              color: (stats?.pending_requests ?? 0) > 0 ? '#9333EA' : 'var(--text-primary)',
+              action: () => router.push('/jinx/requests'),
+              tappable: true,
+            },
+            {
+              label: 'This month',
+              value: loading ? null : formatCurrency(stats?.earnings_this_month ?? 0),
+              color: 'var(--text-primary)',
+              action: () => router.push('/jinx/earnings'),
+              tappable: true,
+            },
+          ].map(stat => (
+            <button key={stat.label} onClick={stat.action}
+              className="p-4 rounded-2xl text-left"
+              style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+              {stat.value === null ? (
+                <div className="space-y-2">
+                  <Shimmer width="60%" height={24} rounded={4} />
+                  <Shimmer width="80%" height={12} rounded={4} />
+                </div>
+              ) : (
+                <>
+                  <p className="font-display text-2xl mb-1" style={{ color: stat.color }}>
+                    {stat.value}
                   </p>
                   <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                    {booking.duration_tier} · {formatRelativeTime(booking.created_at)}
+                    {stat.label}
                   </p>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm font-semibold"
-                    style={{ color: '#9333EA', fontFamily: 'var(--font-body)' }}>
-                    {formatCurrency(booking.vendor_payout ?? 0)}
-                  </p>
-                  <span
-                    className="text-xs px-2 py-0.5 rounded-full"
-                    style={{
-                      background: booking.status === 'completed'
-                        ? 'rgba(0,217,126,0.1)' : 'rgba(255,184,0,0.1)',
-                      color: booking.status === 'completed' ? '#00D97E' : '#FFB800',
-                      fontFamily: 'var(--font-body)',
-                    }}
-                  >
-                    {booking.status}
-                  </span>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+                </>
+              )}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Quick actions */}
+      <div className="px-5 pb-6 space-y-3">
+        <p className="text-xs font-medium uppercase tracking-widest"
+          style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+          Quick actions
+        </p>
+
+        {[
+          { label: 'View requests',    icon: '📋', action: () => router.push('/jinx/requests'),  badge: stats?.pending_requests },
+          { label: 'My schedule',      icon: '📅', action: () => router.push('/jinx/schedule') },
+          { label: 'Earnings',         icon: '💰', action: () => router.push('/jinx/earnings') },
+          { label: 'Edit Jinx profile',icon: '✏️', action: () => router.push('/jinx/profile') },
+        ].map(item => (
+          <button key={item.label} onClick={item.action}
+            className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left"
+            style={{ background: 'var(--bg-surface)', border: '1px solid var(--border)', cursor: 'pointer' }}>
+            <span className="text-base w-6 text-center">{item.icon}</span>
+            <span className="flex-1 text-sm font-medium"
+              style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
+              {item.label}
+            </span>
+            {item.badge ? (
+              <div className="w-6 h-6 rounded-full flex items-center justify-center"
+                style={{ background: '#9333EA' }}>
+                <span style={{ fontSize: 11, color: 'white', fontFamily: 'var(--font-body)', fontWeight: 600 }}>
+                  {item.badge > 9 ? '9+' : item.badge}
+                </span>
+              </div>
+            ) : (
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M6 4l4 4-4 4" stroke="var(--text-muted)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            )}
+          </button>
+        ))}
+
+        {/* Switch to Client Mode */}
+        <button onClick={handleSwitchToClient} disabled={switchingMode}
+          className="w-full flex items-center gap-3 px-4 py-3.5 rounded-2xl text-left"
+          style={{ background: 'transparent', border: '1px solid var(--border)', cursor: switchingMode ? 'not-allowed' : 'pointer', opacity: switchingMode ? 0.6 : 1 }}>
+          <span className="text-base w-6 text-center">🔄</span>
+          <span className="flex-1 text-sm font-medium"
+            style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-body)' }}>
+            {switchingMode ? 'Switching...' : 'Switch to Client Mode'}
+          </span>
+        </button>
+      </div>
+
+      <style jsx>{`
+        @keyframes skeleton-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+      `}</style>
     </div>
   )
 }
