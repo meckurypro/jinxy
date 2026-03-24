@@ -152,10 +152,13 @@ export default function BecomeJinxPage() {
         .from('client_profiles')
         .upsert({ user_id: profile.id }, { onConflict: 'user_id' })
 
-      await refresh()
+// Sync the mode cookie so middleware routes correctly
+document.cookie = 'jinxy-mode=jinx; path=/; max-age=31536000; SameSite=Lax'
 
-      setStep('done')
-      setTimeout(() => router.push('/jinx/dashboard'), 1800)
+await refresh()
+
+setStep('done')
+setTimeout(() => router.push('/jinx/dashboard'), 1800)
 
     } catch (err: unknown) {
       console.error('[become-jinx] error:', err)
