@@ -365,7 +365,7 @@ export default function AccountPage() {
       </div>
 
       {/* ── Menu sections ──────────────────────────────────────────────────── */}
-      <div className="relative px-5 pb-8 space-y-6">
+      <div className="relative px-5 pb-28 space-y-6">
         {menuSections.map(section => (
           section.items.length === 0 ? null : (
             <div key={section.title}>
