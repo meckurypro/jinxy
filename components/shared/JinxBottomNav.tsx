@@ -92,7 +92,7 @@ export function JinxBottomNav() {
             <div className="relative"
               style={{ transform: isActive ? 'translateY(-1px)' : 'translateY(0)', transition: 'transform 200ms ease' }}>
               <Icon active={isActive} />
-              {tab.dot && (
+              {hasDot && (
                 <div className="absolute rounded-full"
                   style={{ width: 7, height: 7, background: '#9333EA', border: '1.5px solid var(--bg-base)', top: -1, right: -1 }} />
               )}
