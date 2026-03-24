@@ -90,28 +90,48 @@ export default function BecomeJinxPage() {
     if (!rateNum || rateNum < 1000) { setError('Minimum rate must be at least ₦1,000'); return }
 
     setLoading(true)
+    setError('')
 
     try {
-      // Insert jinx_profiles row
-      const { error: jpError } = await supabase
+      // Check if jinx_profile already exists for this user
+      const { data: existing } = await supabase
         .from('jinx_profiles')
-        .upsert({
-          user_id: profile.id,
-          gender: gender as 'male' | 'female',
-          orientation,
-          skin_tone: skinTone,
-          body_type: bodyType,
-          ethnicity,
-          bio: bio.trim() || null,
-          operating_area: operatingArea.trim() || null,
-          min_hourly_rate: rateNum,
-          is_adult_enabled: isAdultEnabled,
-          is_active: false,
-          kyc_status: 'pending',
-          status: 'offline',
-        }, { onConflict: 'user_id' })
+        .select('id')
+        .eq('user_id', profile.id)
+        .maybeSingle()
 
-      if (jpError) throw jpError
+      const profilePayload = {
+        user_id: profile.id,
+        gender: gender as 'male' | 'female',
+        orientation,
+        skin_tone: skinTone,
+        body_type: bodyType,
+        ethnicity,
+        bio: bio.trim() || null,
+        operating_area: operatingArea.trim() || null,
+        min_hourly_rate: rateNum,
+        is_adult_enabled: isAdultEnabled,
+        is_active: false,
+        kyc_status: 'pending',
+        status: 'offline',
+      }
+
+      if (existing) {
+        // Row exists — update it
+        const { error: updateError } = await supabase
+          .from('jinx_profiles')
+          .update(profilePayload)
+          .eq('user_id', profile.id)
+
+        if (updateError) throw updateError
+      } else {
+        // No row yet — insert fresh
+        const { error: insertError } = await supabase
+          .from('jinx_profiles')
+          .insert(profilePayload)
+
+        if (insertError) throw insertError
+      }
 
       // Update user: role → jinx, current_mode → jinx
       const { error: userError } = await supabase
@@ -122,7 +142,9 @@ export default function BecomeJinxPage() {
       if (userError) throw userError
 
       // Create client_profiles if it doesn't exist yet
-      await supabase.from('client_profiles').upsert({ user_id: profile.id }, { onConflict: 'user_id' })
+      await supabase
+        .from('client_profiles')
+        .upsert({ user_id: profile.id }, { onConflict: 'user_id' })
 
       await refresh()
       setStep('done')
@@ -130,7 +152,9 @@ export default function BecomeJinxPage() {
       // Brief pause then go to Jinx dashboard
       setTimeout(() => router.replace('/jinx/dashboard'), 1800)
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Something went wrong. Try again.')
+      console.error('[become-jinx] handleComplete error:', err)
+      const message = err instanceof Error ? err.message : JSON.stringify(err)
+      setError(message || 'Something went wrong. Try again.')
       setLoading(false)
     }
   }
@@ -482,11 +506,22 @@ export default function BecomeJinxPage() {
               </p>
             </div>
 
-            {error && <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 13 }}>{error}</p>}
+            {error && (
+              <div className="p-3 rounded-xl"
+                style={{ background: 'rgba(255,77,106,0.08)', border: '1px solid rgba(255,77,106,0.2)' }}>
+                <p style={{ color: 'var(--red)', fontFamily: 'var(--font-body)', fontSize: 13, lineHeight: 1.5 }}>
+                  {error}
+                </p>
+              </div>
+            )}
 
             <button onClick={handleComplete} disabled={loading}
               style={primaryBtn(loading)}>
-              {loading ? <Spinner /> : "Let's go 🎉"}
+              {loading
+                ? <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                    <Spinner /> Setting up your profile...
+                  </span>
+                : "Let's go 🎉"}
             </button>
           </>
         )}
