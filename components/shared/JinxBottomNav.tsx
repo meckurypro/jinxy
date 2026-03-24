@@ -88,7 +88,7 @@ export function JinxBottomNav() {
     { id: 'requests',  href: '/jinx/requests',  label: 'Requests', icon: RequestsIcon },
     { id: 'schedule',  href: '/jinx/schedule',  label: '',         icon: ToggleIcon, center: true },
     { id: 'inbox',     href: '/jinx/inbox',     label: 'Messages', icon: MessagesIcon },
-    { id: 'account',   href: '/account',        label: 'Account',  icon: AccountIcon },
+    { id: 'account',   href: '/jinx/account',   label: 'Account',  icon: AccountIcon },
   ]
 
   return (
