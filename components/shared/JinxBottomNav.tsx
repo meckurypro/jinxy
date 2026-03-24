@@ -3,7 +3,7 @@
 // Dots: home=system/misc, requests=incoming bookings, messages=inbox
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, ReactElement } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -19,7 +19,7 @@ interface Tab {
   id: string
   href: string
   label: string
-  icon: ({ active }: { active: boolean }) => JSX.Element
+  icon: ({ active }: { active: boolean }) => ReactElement
   center?: boolean
 }
 
