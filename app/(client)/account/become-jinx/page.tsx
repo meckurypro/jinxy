@@ -10,32 +10,36 @@ type Step = 'gender' | 'orientation' | 'ethnicity' | 'body_type' | 'skin_tone' |
 
 const STEPS: Step[] = ['gender', 'orientation', 'ethnicity', 'body_type', 'skin_tone', 'bio', 'area', 'rate', 'adult']
 
+// enum orientation_type: {straight, bi, gay, lesbian}
 const ORIENTATIONS = [
   { value: 'straight', label: 'Straight' },
-  { value: 'gay', label: 'Gay' },
-  { value: 'bisexual', label: 'Bisexual' },
-  { value: 'prefer_not_to_say', label: 'Prefer not to say' },
+  { value: 'gay',      label: 'Gay' },
+  { value: 'lesbian',  label: 'Lesbian' },
+  { value: 'bi',       label: 'Bisexual' },
 ]
 
 const ETHNICITIES = ['Edo', 'Efik', 'Hausa', 'Igbo', 'Ijaw', 'Other', 'Tiv', 'Yoruba']
 
+// enum body_type: {slim, athletic, curvy, plus_size, muscular, average}
 const BODY_TYPES = [
-  { value: 'slim', label: 'Slim' },
-  { value: 'athletic', label: 'Athletic' },
-  { value: 'average', label: 'Average' },
-  { value: 'curvy', label: 'Curvy' },
+  { value: 'slim',      label: 'Slim' },
+  { value: 'athletic',  label: 'Athletic' },
+  { value: 'average',   label: 'Average' },
+  { value: 'curvy',     label: 'Curvy' },
   { value: 'plus_size', label: 'Plus size' },
-  { value: 'muscular', label: 'Muscular' },
+  { value: 'muscular',  label: 'Muscular' },
 ]
 
+// enum skin_tone: {very_light, light, medium, tan, dark, very_dark, obsidian}
+// Run in Supabase before deploying: ALTER TYPE skin_tone ADD VALUE 'obsidian' AFTER 'very_dark';
 const SKIN_TONES = [
-  { value: 'very_light', label: 'Very light', color: '#F5DEB3' },
-  { value: 'light', label: 'Light', color: '#DEB887' },
-  { value: 'medium_light', label: 'Medium light', color: '#C8A07A' },
-  { value: 'medium', label: 'Medium', color: '#A0714F' },
-  { value: 'medium_dark', label: 'Medium dark', color: '#7B4F2E' },
-  { value: 'dark', label: 'Dark', color: '#4A2E1A' },
-  { value: 'very_dark', label: 'Very dark', color: '#2C1A0E' },
+  { value: 'very_light', label: 'Very light',  color: '#F5DEB3' },
+  { value: 'light',      label: 'Light',        color: '#DEB887' },
+  { value: 'medium',     label: 'Medium',       color: '#C8A07A' },
+  { value: 'tan',        label: 'Tan',          color: '#A0714F' },
+  { value: 'dark',       label: 'Dark',         color: '#7B4F2E' },
+  { value: 'very_dark',  label: 'Very dark',    color: '#4A2E1A' },
+  { value: 'obsidian',   label: 'Obsidian',     color: '#1A0D07' },
 ]
 
 function Spinner() {
@@ -59,17 +63,17 @@ export default function BecomeJinxPage() {
   // Gender is locked to whatever was set at sign-up — never editable here
   const lockedGender = profile?.gender ?? ''
 
-  const [orientation, setOrientation] = useState('')
-  const [ethnicity, setEthnicity] = useState('')
-  const [bodyType, setBodyType] = useState('')
-  const [skinTone, setSkinTone] = useState('')
-  const [bio, setBio] = useState('')
-  const [operatingArea, setOperatingArea] = useState('')
-  const [minRate, setMinRate] = useState('')
+  const [orientation, setOrientation]       = useState('')
+  const [ethnicity, setEthnicity]           = useState('')
+  const [bodyType, setBodyType]             = useState('')
+  const [skinTone, setSkinTone]             = useState('')
+  const [bio, setBio]                       = useState('')
+  const [operatingArea, setOperatingArea]   = useState('')
+  const [minRate, setMinRate]               = useState('')
   const [isAdultEnabled, setIsAdultEnabled] = useState(false)
 
   const stepIndex = STEPS.indexOf(step)
-  const progress = (stepIndex / (STEPS.length - 1)) * 100
+  const progress  = (stepIndex / (STEPS.length - 1)) * 100
 
   const goBack = () => {
     if (stepIndex === 0) { router.back(); return }
@@ -107,19 +111,19 @@ export default function BecomeJinxPage() {
       if (checkError) throw checkError
 
       const profilePayload = {
-        user_id: profile.id,
-        gender: lockedGender as 'male' | 'female',
-        orientation,
-        skin_tone: skinTone,
-        body_type: bodyType,
+        user_id:          profile.id,
+        gender:           lockedGender as 'male' | 'female',  // enum gender_type: {male, female}
+        orientation,                                           // enum orientation_type: {straight, bi, gay, lesbian}
+        skin_tone:        skinTone,                            // enum skin_tone: {very_light, light, medium, tan, dark, very_dark, obsidian}
+        body_type:        bodyType,                            // enum body_type: {slim, athletic, curvy, plus_size, muscular, average}
         ethnicity,
-        bio: bio.trim() || null,
-        operating_area: operatingArea.trim() || null,
-        min_hourly_rate: rateNum,
+        bio:              bio.trim() || null,
+        operating_area:   operatingArea.trim() || null,
+        min_hourly_rate:  rateNum,
         is_adult_enabled: isAdultEnabled,
-        is_active: false,
-        kyc_status: 'pending',
-        status: 'offline',
+        is_active:        false,
+        kyc_status:       'pending',   // enum kyc_status: {pending, submitted, approved, rejected, expired}
+        status:           'offline',   // enum vendor_status: {offline, available, busy, unavailable}
       }
 
       if (existing) {
@@ -135,21 +139,22 @@ export default function BecomeJinxPage() {
         if (insertError) throw insertError
       }
 
-    const { error: userError } = await supabase
-  .from('users')
-  .update({ role: 'vendor', current_mode: 'vendor' })
-  .eq('id', profile.id)
-if (userError) throw userError
+      // user_role enum: {client, moderator_admin, support_admin, marketing_admin, analytics_admin, superadmin}
+      // — no vendor/jinx role exists; role stays 'client', only current_mode changes
+      // user_mode enum: {client, jinx}
+      const { error: userError } = await supabase
+        .from('users')
+        .update({ current_mode: 'jinx' })
+        .eq('id', profile.id)
+      if (userError) throw userError
 
       await supabase
         .from('client_profiles')
         .upsert({ user_id: profile.id }, { onConflict: 'user_id' })
 
-      // Refresh profile so layout guard sees role=jinx, current_mode=jinx
       await refresh()
 
       setStep('done')
-      // Small delay to show the done screen, then push to jinx dashboard
       setTimeout(() => router.push('/jinx/dashboard'), 1800)
 
     } catch (err: unknown) {
@@ -295,7 +300,7 @@ if (userError) throw userError
           </>
         )}
 
-        {/* Orientation */}
+        {/* Orientation — enum orientation_type: {straight, bi, gay, lesbian} */}
         {step === 'orientation' && (
           <>
             {ORIENTATIONS.map(o => (
@@ -329,7 +334,7 @@ if (userError) throw userError
           </>
         )}
 
-        {/* Body type */}
+        {/* Body type — enum body_type: {slim, athletic, curvy, plus_size, muscular, average} */}
         {step === 'body_type' && (
           <>
             <div className="grid grid-cols-2 gap-2">
@@ -350,7 +355,7 @@ if (userError) throw userError
           </>
         )}
 
-        {/* Skin tone */}
+        {/* Skin tone — enum skin_tone: {very_light, light, medium, tan, dark, very_dark, obsidian} */}
         {step === 'skin_tone' && (
           <>
             <div className="grid grid-cols-4 gap-3">
