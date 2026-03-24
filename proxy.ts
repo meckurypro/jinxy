@@ -42,7 +42,7 @@ function matchesPrefix(pathname: string, prefixes: string[]): boolean {
 // Middleware
 // ---------------------------------------------------------------------------
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl
 
   // ── 1. Build a mutable response and create the Supabase client ────────────
