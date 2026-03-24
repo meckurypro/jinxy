@@ -18,7 +18,7 @@ const JINX_TABS = [
   { id: 'requests',     href: '/jinx/requests',     label: 'Requests', icon: JinxesIcon },
   { id: 'availability', href: '/jinx/availability', label: '',         icon: AvailabilityIcon, center: true },
   { id: 'earnings',     href: '/jinx/earnings',     label: 'Earnings', icon: EarningsIcon },
-  { id: 'account',      href: '/account',           label: 'Account',  icon: AccountIcon },
+ { id: 'account',      href: '/jinx/account',      label: 'Account',  icon: AccountIcon },
 ]
 
 interface Dots {
