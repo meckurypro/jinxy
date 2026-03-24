@@ -7,12 +7,12 @@ import { useEffect, useState } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
-interface Dots { home: boolean; requests: boolean; earnings: boolean }
+interface Dots { home: boolean; requests: boolean; earnings: boolean; messages: boolean }
 
 export function JinxBottomNav() {
   const pathname = usePathname()
   const router = useRouter()
-  const [dots, setDots] = useState<Dots>({ home: false, requests: false, earnings: false })
+  const [dots, setDots] = useState<Dots>({ home: false, requests: false, earnings: false, messages: false })
 
   useEffect(() => {
     fetchDots()
@@ -26,29 +26,39 @@ export function JinxBottomNav() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) return
 
-      const [sysRes, reqRes, earnRes] = await Promise.all([
+      const [sysRes, reqRes, earnRes, msgRes] = await Promise.all([
         supabase.from('notifications').select('id', { count: 'exact', head: true })
           .eq('user_id', user.id).eq('is_read', false).in('type', ['system', 'admin']),
         supabase.from('notifications').select('id', { count: 'exact', head: true })
           .eq('user_id', user.id).eq('is_read', false).in('type', ['booking_request', 'match_found']),
         supabase.from('notifications').select('id', { count: 'exact', head: true })
           .eq('user_id', user.id).eq('is_read', false).in('type', ['payout', 'payment_received']),
+        supabase.from('notifications').select('id', { count: 'exact', head: true })
+          .eq('user_id', user.id).eq('is_read', false).in('type', ['message', 'invite']),
       ])
 
       setDots({
         home: (sysRes.count ?? 0) > 0,
         requests: (reqRes.count ?? 0) > 0,
         earnings: (earnRes.count ?? 0) > 0,
+        messages: (msgRes.count ?? 0) > 0,
       })
     } catch { /* silent */ }
   }
 
+  const getDot = (tabId: string): boolean => {
+    if (tabId === 'dashboard') return dots.home
+    if (tabId === 'requests') return dots.requests
+    if (tabId === 'inbox') return dots.messages
+    return false
+  }
+
   const TABS = [
-    { id: 'dashboard', href: '/jinx/dashboard', label: 'Home',     icon: HomeIcon,     dot: dots.home },
-    { id: 'requests',  href: '/jinx/requests',  label: 'Requests', icon: RequestsIcon, dot: dots.requests },
+    { id: 'dashboard', href: '/jinx/dashboard', label: 'Home',     icon: HomeIcon },
+    { id: 'requests',  href: '/jinx/requests',  label: 'Requests', icon: RequestsIcon },
     { id: 'schedule',  href: '/jinx/schedule',  label: '',         icon: ToggleIcon,   center: true },
-    { id: 'earnings',  href: '/jinx/earnings',  label: 'Earnings', icon: EarningsIcon, dot: dots.earnings },
-    { id: 'account',   href: '/account',        label: 'Account',  icon: AccountIcon,  dot: false },
+    { id: 'inbox',     href: '/jinx/inbox',     label: 'Messages', icon: MessagesIcon },
+    { id: 'account',   href: '/account',        label: 'Account',  icon: AccountIcon },
   ]
 
   return (
@@ -56,8 +66,9 @@ export function JinxBottomNav() {
       {TABS.map(tab => {
         const isActive = pathname === tab.href || pathname.startsWith(tab.href + '/')
         const Icon = tab.icon
+        const hasDot = getDot(tab.id)
 
-        if (tab.center) {
+        if ((tab as { center?: boolean }).center) {
           return (
             <button key={tab.id} onClick={() => router.push(tab.href)}
               className="relative -mt-6 flex items-center justify-center"
@@ -132,6 +143,15 @@ function EarningsIcon({ active }: { active: boolean }) {
         stroke="currentColor" strokeWidth="1.5"/>
       <path d="M11 7.5V14.5M9 9.5H12.5C13.33 9.5 14 10.17 14 11C14 11.83 13.33 12.5 12.5 12.5H9"
         stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+    </svg>
+  )
+}
+function MessagesIcon({ active }: { active: boolean }) {
+  return (
+    <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+      <path d="M4 4H18C18.55 4 19 4.45 19 5V14C19 14.55 18.55 15 18 15H7L3 19V5C3 4.45 3.45 4 4 4Z"
+        fill={active ? 'currentColor' : 'none'} fillOpacity={active ? 0.15 : 0}
+        stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
     </svg>
   )
 }
