@@ -1,4 +1,4 @@
-// app/(jinx)/messages/page.tsx
+// app/(jinx)/inbox/page.tsx — Jinx messages at /jinx/inbox to avoid route conflict with (client)/messages
 // Mirrors client messages but queries as jinx_id
 'use client'
 
