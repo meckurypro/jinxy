@@ -265,7 +265,7 @@ export default function JinxAccountPage() {
       </div>
 
       {/* ── Menu sections ──────────────────────────────────────────────────── */}
-      <div className="relative px-5 pb-8 space-y-6">
+     <div className="relative px-5 pb-28 space-y-6">
         {menuSections.map(section => (
           <div key={section.title}>
             <p className="text-xs font-medium uppercase tracking-widest mb-2 px-1"
