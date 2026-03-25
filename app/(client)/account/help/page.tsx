@@ -118,7 +118,7 @@ export default function HelpPage() {
         </p>
       </div>
 
-      <div className="relative px-5 pb-12 space-y-4">
+     <div className="relative px-5 pb-28 space-y-4">
 
         {/* Search */}
         <div style={{ position: 'relative' }}>
