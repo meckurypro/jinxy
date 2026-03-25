@@ -142,7 +142,7 @@ export default function PreferencesPage() {
         </p>
       </div>
 
-      <div className="relative px-5 pb-32 space-y-7">
+     <div className="relative px-5 pb-36 space-y-7">
 
         {/* Interested in */}
         <div>
