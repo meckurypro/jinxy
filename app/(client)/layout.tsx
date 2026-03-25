@@ -1,9 +1,5 @@
 // app/(client)/layout.tsx
-// Client mode layout.
-// If the user is in jinx mode, redirect them to the jinx dashboard.
-// /account is whitelisted so the mode-switch page is always reachable.
 'use client'
-
 import { useEffect } from 'react'
 import { useRouter, usePathname } from 'next/navigation'
 import { useUser } from '@/lib/hooks/useUser'
@@ -17,10 +13,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     if (loading || !profile) return
-
     if (profile.current_mode === 'jinx') {
-      // Allow /account so users can always reach the mode-switch option
-      // even if they land here from a stale link or back-navigation
       const isAccountPage = pathname?.startsWith('/account')
       if (!isAccountPage) {
         router.replace('/jinx/dashboard')
@@ -32,6 +25,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     <div className="relative min-h-dvh" style={{ background: 'var(--bg-base)' }}>
       <BookingToast />
       {children}
+      <div className="h-20" aria-hidden="true" /> {/* spacer so pages clear the fixed BottomNav */}
       <BottomNav mode="client" />
     </div>
   )
