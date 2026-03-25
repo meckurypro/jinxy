@@ -2,7 +2,6 @@
 // Single source of truth for mode switching.
 // Writes current_mode to DB, sets the MODE_COOKIE so middleware can read it
 // immediately on the next request, refreshes the user profile, then navigates.
-
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useSupabase } from '@/lib/hooks/useSupabase'
@@ -13,9 +12,6 @@ export type UserMode = 'client' | 'jinx'
 const MODE_COOKIE = 'jinxy-mode'
 
 function setModeCookie(mode: UserMode) {
-  // Accessible to JS (not httpOnly) because middleware also reads it via
-  // request.cookies — which reads the cookie header, not document.cookie.
-  // SameSite=Lax is safe for same-origin navigation.
   const maxAge = 60 * 60 * 24 * 365 // 1 year
   document.cookie = `${MODE_COOKIE}=${mode}; path=/; max-age=${maxAge}; SameSite=Lax`
 }
@@ -28,36 +24,35 @@ export function useSwitchMode() {
 
   const switchTo = async (mode: UserMode) => {
     if (!profile?.id || switching) return
-    if (profile.current_mode === mode) {
-      // Already in the right mode — just navigate
-      router.replace(mode === 'jinx' ? '/jinx/dashboard' : '/home')
-      return
-    }
 
     setSwitching(true)
 
-    const { error } = await supabase
-      .from('users')
-      .update({ current_mode: mode })
-      .eq('id', profile.id)
-
-    if (error) {
-      console.error('[useSwitchMode] failed to update current_mode:', error)
-      setSwitching(false)
-      return
-    }
-
-    // Write cookie immediately so middleware sees the new mode on next navigation
+    // Always write the cookie first — this is what the middleware reads.
+    // Even if current_mode already matches in the DB, the cookie may be stale
+    // (e.g. after a fresh login or cross-device session), so we always set it.
     setModeCookie(mode)
 
-    // Refresh local profile state
+    if (profile.current_mode !== mode) {
+      const { error } = await supabase
+        .from('users')
+        .update({ current_mode: mode })
+        .eq('id', profile.id)
+
+      if (error) {
+        console.error('[useSwitchMode] failed to update current_mode:', error)
+        // Revert cookie on failure
+        setModeCookie(profile.current_mode as UserMode)
+        setSwitching(false)
+        return
+      }
+    }
+
+    // Refresh local profile state so useUser reflects new current_mode
     await refresh()
 
     // Navigate — middleware will now allow the destination
     router.replace(mode === 'jinx' ? '/jinx/dashboard' : '/home')
-
-    // Note: setSwitching(false) is intentionally omitted here — the component
-    // will unmount on navigation so there's no state to reset.
+    // setSwitching(false) intentionally omitted — component unmounts on navigation
   }
 
   return { switchTo, switching }
