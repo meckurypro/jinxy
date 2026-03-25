@@ -79,7 +79,7 @@ export default function ReportPage() {
         )}
       </div>
 
-      <div className="relative flex-1 px-5 pb-12">
+      <div className="relative flex-1 px-5 pb-28">
 
         {/* Category selection */}
         {step === 'category' && (
