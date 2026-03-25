@@ -148,7 +148,7 @@ export default function EditProfilePage() {
         </h1>
       </div>
 
-      <div className="px-5 pb-8 space-y-6">
+     <div className="px-5 pb-28 space-y-6">
 
         {/* Avatar — read only, skeleton while loading */}
         <div className="flex flex-col items-center gap-2">
