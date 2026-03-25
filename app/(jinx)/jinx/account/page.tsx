@@ -1,6 +1,7 @@
-// app/(jinx)/account/page.tsx
-// Jinx-mode account page. Shows jinx profile stats and earnings info.
-// Primary CTA is "Switch to Client Mode" using useSwitchMode hook.
+// app/(jinx)/jinx/account/page.tsx
+// Jinx-mode account page.
+// Top CTA: switch to client mode (via useSwitchMode — never bypass this).
+// Sections: mode switch · jinx profile · earnings · account · support · logout
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -18,11 +19,7 @@ interface JinxStats {
   totalFollowers: number
 }
 
-function Shimmer({ width, height, rounded = 8 }: {
-  width: string | number
-  height: number
-  rounded?: number
-}) {
+function Shimmer({ width, height, rounded = 8 }: { width: string | number; height: number; rounded?: number }) {
   return (
     <div style={{
       width, height, borderRadius: rounded, flexShrink: 0,
@@ -34,7 +31,7 @@ function Shimmer({ width, height, rounded = 8 }: {
 
 export default function JinxAccountPage() {
   const router = useRouter()
-  const { profile, loading: profileLoading, refresh } = useUser()
+  const { profile, loading: profileLoading } = useUser()
   const supabase = useSupabase()
   const { switchTo, switching } = useSwitchMode()
 
@@ -56,7 +53,7 @@ export default function JinxAccountPage() {
         .maybeSingle(),
       supabase
         .from('payments')
-        .select('amount', { count: 'exact' })
+        .select('amount')
         .eq('payee_id', profile.id)
         .eq('payment_status', 'released'),
     ])
@@ -67,9 +64,9 @@ export default function JinxAccountPage() {
     )
 
     setStats({
-      totalJinxes: jp?.total_jinxes ?? 0,
+      totalJinxes:    jp?.total_jinxes    ?? 0,
       totalEarnings,
-      averageRating: jp?.average_rating ?? 0,
+      averageRating:  jp?.average_rating  ?? 0,
       totalFollowers: jp?.total_followers ?? 0,
     })
   }
@@ -101,7 +98,7 @@ export default function JinxAccountPage() {
       title: 'Mode',
       items: [
         {
-          label: switching ? 'Switching...' : 'Switch to Client Mode',
+          label: switching ? 'Switching...' : 'Switch to client mode',
           icon: '🔄',
           action: () => switchTo('client'),
           highlight: true,
@@ -111,7 +108,7 @@ export default function JinxAccountPage() {
       ],
     },
     {
-      title: 'Jinx Profile',
+      title: 'Jinx profile',
       items: [
         { label: 'Edit Jinx profile',     icon: '✏️', action: () => router.push('/jinx/profile/edit') },
         { label: 'Availability',          icon: '📅', action: () => router.push('/jinx/availability') },
@@ -123,7 +120,7 @@ export default function JinxAccountPage() {
       title: 'Earnings',
       items: [
         { label: 'Earnings & payouts',    icon: '💸', action: () => router.push('/jinx/earnings') },
-        { label: 'Referrals & Credits',   icon: '💰', action: () => router.push('/jinx/referrals') },
+        { label: 'Referrals & credits',   icon: '💰', action: () => router.push('/jinx/referrals') },
         { label: 'My subscription',       icon: '⭐', action: () => router.push('/jinx/subscription') },
       ],
     },
@@ -154,9 +151,8 @@ export default function JinxAccountPage() {
   return (
     <div className="min-h-dvh" style={{ background: 'var(--bg-base)' }}>
 
-      {/* Purple tint */}
       <div className="absolute inset-0 pointer-events-none" style={{
-        background: 'radial-gradient(ellipse 60% 25% at 50% 0%, rgba(147,51,234,0.08) 0%, transparent 60%)',
+        background: 'radial-gradient(ellipse 60% 25% at 50% 0%, rgba(147,51,234,0.07) 0%, transparent 60%)',
       }} />
 
       {/* ── Profile header ─────────────────────────────────────────────────── */}
@@ -188,7 +184,6 @@ export default function JinxAccountPage() {
                   <h1 className="font-display text-xl truncate" style={{ color: 'var(--text-primary)' }}>
                     {profile?.full_name || profile?.username || '—'}
                   </h1>
-                  {/* Always show Jinx badge in jinx mode */}
                   <span className="px-2 py-0.5 rounded-full text-xs font-semibold flex-shrink-0"
                     style={{ background: 'rgba(147,51,234,0.15)', color: '#9333EA', fontFamily: 'var(--font-body)' }}>
                     Jinx
@@ -225,24 +220,22 @@ export default function JinxAccountPage() {
               </div>
             ))
           ) : (
-            <>
-              {[
-                { value: stats.totalJinxes,                    label: 'Jinxes' },
-                { value: formatCurrency(stats.totalEarnings),  label: 'Earned' },
-                { value: stats.averageRating.toFixed(1),       label: 'Rating' },
-                { value: stats.totalFollowers,                 label: 'Followers' },
-              ].map((stat, i) => (
-                <div key={stat.label} className="flex flex-col items-center py-4"
-                  style={{ borderRight: i < 3 ? '1px solid var(--border)' : 'none' }}>
-                  <p className="text-base font-semibold font-display" style={{ color: 'var(--text-primary)' }}>
-                    {stat.value}
-                  </p>
-                  <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
-                    {stat.label}
-                  </p>
-                </div>
-              ))}
-            </>
+            [
+              { value: stats.totalJinxes,                   label: 'Jinxes' },
+              { value: formatCurrency(stats.totalEarnings),  label: 'Earned' },
+              { value: stats.averageRating.toFixed(1),       label: 'Rating' },
+              { value: stats.totalFollowers,                 label: 'Followers' },
+            ].map((stat, i) => (
+              <div key={stat.label} className="flex flex-col items-center py-4"
+                style={{ borderRight: i < 3 ? '1px solid var(--border)' : 'none' }}>
+                <p className="text-base font-semibold font-display" style={{ color: 'var(--text-primary)' }}>
+                  {stat.value}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--text-muted)', fontFamily: 'var(--font-body)' }}>
+                  {stat.label}
+                </p>
+              </div>
+            ))
           )}
         </div>
 
@@ -254,7 +247,7 @@ export default function JinxAccountPage() {
             <div className="flex items-center gap-2">
               <span>💰</span>
               <p className="text-sm font-medium" style={{ color: 'var(--text-primary)', fontFamily: 'var(--font-body)' }}>
-                Jinxy Credits
+                Jinxy credits
               </p>
             </div>
             <p className="text-sm font-semibold" style={{ color: '#9333EA', fontFamily: 'var(--font-body)' }}>
@@ -265,7 +258,7 @@ export default function JinxAccountPage() {
       </div>
 
       {/* ── Menu sections ──────────────────────────────────────────────────── */}
-     <div className="relative px-5 pb-28 space-y-6">
+      <div className="relative px-5 pb-28 space-y-6">
         {menuSections.map(section => (
           <div key={section.title}>
             <p className="text-xs font-medium uppercase tracking-widest mb-2 px-1"
@@ -308,10 +301,7 @@ export default function JinxAccountPage() {
       </div>
 
       <style jsx>{`
-        @keyframes skeleton-pulse {
-          0%, 100% { opacity: 0.4; }
-          50%       { opacity: 0.8; }
-        }
+        @keyframes skeleton-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
       `}</style>
     </div>
   )
