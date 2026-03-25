@@ -149,7 +149,7 @@ export default function TermsPage() {
       </div>
 
       {/* Content */}
-      <div className="relative px-5 pb-12 space-y-3">
+     <div className="relative px-5 pb-28 space-y-3">
         {section.content.map((item, idx) => {
           const isExpanded = expandedHeadings.includes(item.heading)
           return (
